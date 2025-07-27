@@ -1,132 +1,166 @@
+# viz/world.py
 from __future__ import annotations
-import numpy as np, matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
+
+import numpy as np
+import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-from typing import Iterable, Literal, Tuple
+from typing import Iterable, Literal, Optional, Tuple
 
 from nerflab.geometry import Box, Sphere
 from nerflab import Camera
 from .primitives import plot_box, plot_sphere
 from .axis import style_3d_axis, axis_triad, grid3d
-from .viz_config import viz_cfg as VCFG 
+from .viz_config import viz_cfg as CFG
+
+NDArray = np.ndarray
 
 
+# -----------------------------------------------------------------------------
 def plot_world(
     world,
     *,
-    cameras: Iterable[Camera] | None = None,
+    # ───────── camera / ray controls ───────────────────────────────────────
+    cameras: Optional[Iterable[Camera]] = None,
     draw_rays: bool = False,
-    ray_step: int | None = None,
-    ray_mode: Literal["lines", "quiver", "points"] | None = None,
+    ray_step: Optional[int] = None,
+    ray_mode: Optional[Literal["lines", "quiver", "points"]] = None,
+    # ───────── external point cloud (only for ray_mode=="points") ──────────
+    points: Optional[NDArray] = None,        # shape (R, N, 3)
+    point_size: int = 3,
+    # ───────── world occupancy sampling ────────────────────────────────────
     sample_grid: bool = False,
-    grid_bounds: Tuple[Tuple[float, float], ...] | None = None,
-    grid_res: Tuple[int, int, int] | None = None,
-    grid_lines: bool | None = None,
-    grid_step: Tuple[float, float, float] | None = None,
-    invert_x: bool | None = None,
-    figsize: Tuple[int, int] | None = None,
-    elev: float | None = None,
-    azim: float | None = None,
-    t_near: float | None = None,
-    t_far: float | None = None,
-    
+    grid_bounds: Optional[Tuple[Tuple[float, float], ...]] = None,
+    grid_res: Optional[Tuple[int, int, int]] = None,
+    # ───────── lattice grid lines ──────────────────────────────────────────
+    grid_lines: Optional[bool] = None,
+    grid_step: Optional[Tuple[float, float, float]] = None,
+    # ───────── view / style tweaks ─────────────────────────────────────────
+    invert_x: Optional[bool] = None,
+    figsize: Optional[Tuple[int, int]] = None,
+    elev: Optional[float] = None,
+    azim: Optional[float] = None,
+    # ───────── optional near / far override for ALL cameras ───────────────
+    t_near: Optional[float] = None,
+    t_far: Optional[float] = None,
 ) -> None:
     """
-    Visualise a `World` with optional `Camera` objects.
-    All `None` parameters fall back to `viz.cfg` values.
+    Visualise a `World` plus optional `Camera` objects, rays, and a point cloud.
+
+    Parameters
+    ----------
+    cameras        : Iterable of Camera objects.
+    draw_rays      : If *True*, draw rays for each camera.
+    ray_step       : Pixel subsampling stride.  Defaults to `CFG.ray_step`.
+    ray_mode       : How to draw rays — "lines", "quiver", or "points".
+                     Defaults to `CFG.ray_mode`.
+                     **If "points", you MUST pass `points`.**
+    points         : ndarray shaped (R, N, 3) where R = H×W pixels.
+                     Only used when `ray_mode=="points"`.
+    point_size     : Scatter marker size (px) for `points`.
+    sample_grid    : Voxel‑sample occupancy and plot black points for ∞ density.
+    grid_*         : Bounds / resolution / spacing for lattice grid.
+    invert_x       : Flip X‑axis for left‑handed view (e.g. OpenGL convention).
+    elev, azim     : Matplotlib 3‑D camera angles (deg).
+    t_near, t_far  : Override near / far planes for *all* cameras' rays.
     """
 
-    # ---------- resolve defaults from cfg ------------------------------------
-    ray_step = VCFG.ray_step if ray_step is None else ray_step
-    ray_mode = VCFG.ray_mode if ray_mode is None else ray_mode
-    grid_bounds = VCFG.grid_bounds if grid_bounds is None else grid_bounds
-    grid_res = VCFG.grid_res if grid_res is None else grid_res
-    grid_lines = VCFG.grid_lines if grid_lines is None else grid_lines
-    grid_step = VCFG.grid_step if grid_step is None else grid_step
-    figsize = VCFG.figsize if figsize is None else figsize
-    elev = VCFG.axis_elev if elev is None else elev
-    azim = VCFG.axis_azim if azim is None else azim
-    invert_x = ("x" in VCFG.axis_invert) if invert_x is None else invert_x
+    # ── cfg‑driven defaults ────────────────────────────────────────────────
+    ray_step    = CFG.ray_step    if ray_step    is None else ray_step
+    ray_mode    = CFG.ray_mode    if ray_mode    is None else ray_mode
+    grid_bounds = CFG.grid_bounds if grid_bounds is None else grid_bounds
+    grid_res    = CFG.grid_res    if grid_res    is None else grid_res
+    grid_lines  = CFG.grid_lines  if grid_lines  is None else grid_lines
+    grid_step   = CFG.grid_step   if grid_step   is None else grid_step
+    figsize     = CFG.figsize     if figsize     is None else figsize
+    elev        = CFG.axis_elev   if elev        is None else elev
+    azim        = CFG.axis_azim   if azim        is None else azim
+    invert_x    = ("x" in CFG.axis_invert) if invert_x is None else invert_x
 
-    fig = plt.figure(figsize=figsize, dpi=VCFG.dpi)
-    ax = fig.add_subplot(111, projection="3d")
+    # ── enforce rule: points required for "points" mode ────────────────────
+    if ray_mode == "points":
+        if points is None:
+            raise ValueError(
+                "`ray_mode='points'` requires a `points` array shaped (R, N, 3)."
+            )
+        if points.ndim != 3 or points.shape[-1] != 3:
+            raise ValueError("`points` must have exactly three dims: (R, N, 3).")
 
-    # ---------- shapes -------------------------------------------------------
-    for shp in getattr(world, "shapes", []):
-        (plot_box if isinstance(shp, Box) else plot_sphere)(ax, shp)
+    # ── create figure / axis ───────────────────────────────────────────────
+    fig = plt.figure(figsize=figsize, dpi=CFG.dpi)
+    ax  = fig.add_subplot(111, projection="3d")
 
-    # ---------- occupancy sampling ------------------------------------------
+    # ── draw world shapes ──────────────────────────────────────────────────
+    for s in getattr(world, "shapes", []):
+        (plot_box if isinstance(s, Box) else plot_sphere)(ax, s)
+
+    # ── optional voxel occupancy sample ────────────────────────────────────
     if sample_grid:
         xs = np.linspace(*grid_bounds[0], grid_res[0], dtype=float)
         ys = np.linspace(*grid_bounds[1], grid_res[1], dtype=float)
         zs = np.linspace(*grid_bounds[2], grid_res[2], dtype=float)
-        pts = np.stack(np.meshgrid(xs, ys, zs, indexing="ij"), -1).reshape(-1, 3)
-        occ = pts[np.isinf([world.density(*p) for p in pts])]
-        if occ.size:
-            ax.scatter(*occ.T, s=1, c="k", alpha=0.4, label="occ")
+        grid_pts = np.stack(np.meshgrid(xs, ys, zs, indexing="ij"), -1).reshape(-1, 3)
+        occ_pts  = grid_pts[np.isinf([world.density(*p) for p in grid_pts])]
+        if occ_pts.size:
+            ax.scatter(*occ_pts.T, s=1, c="k", alpha=0.4, label="occ")
 
-    # ---------- world triad --------------------------------------------------
-    axis_triad(ax, length=VCFG.axis_triad_len)
+    # ── world axis triad ───────────────────────────────────────────────────
+    axis_triad(ax, length=CFG.axis_triad_len)
 
-    # ---------- cameras & rays ----------------------------------------------
+    # ── cameras & rays (and external points) ───────────────────────────────
     if cameras:
-        for i, cam in enumerate(cameras):
-            t_near = cam.t_near if t_near is None else t_near
-            t_far = cam.t_far if t_far is None else t_far
-            
-            cam_pos = cam.H_wc[:3, 3]
-            ray_len = t_far
-            colour = f"C{i % 10}"
+        for idx, cam in enumerate(cameras):
+            colour = f"C{idx % 10}"
 
-            ax.scatter(
-                *cam_pos,
-                s=VCFG.camera_marker_size,
-                c="red",
-                marker="o",
-                label=f"Cam {i}",
-            )
+            # ----- camera marker & axes -----------------------------------
+            cam_pos = cam.H_wc[:3, 3]
+            ax.scatter(*cam_pos, s=CFG.camera_marker_size,
+                       c="red", marker="o", label=f"Cam {idx}")
             Camera._draw_pose_axes(ax, cam.H_wc, scale=0.4)
 
             if not draw_rays:
                 continue
 
+            # ----- resolve per‑camera near/far ----------------------------
+            near = t_near if t_near is not None else cam.t_near
+            far  = t_far  if t_far  is not None else cam.t_far
+
+            # ----- external points branch ---------------------------------
+            if ray_mode == "points":
+                total_pixels = cam.intr.height * cam.intr.width
+                if points.shape[0] != total_pixels:
+                    raise ValueError(
+                        f"`points` first dim ({points.shape[0]}) must equal "
+                        f"H×W = {total_pixels} for camera {idx}."
+                    )
+                cloud = points[::ray_step].reshape(-1, 3)
+                ax.scatter(*cloud.T, s=point_size, c=colour, depthshade=False)
+                continue  # skip ray drawing for this cam
+
+            # ----- compute / draw rays ------------------------------------
             O, D = cam.get_rays(frame="world", step=ray_step, normalize=True)
 
             if ray_mode == "quiver":
-                ax.quiver(
-                    *O.T,
-                    *D.T,
-                    length=ray_len,
-                    normalize=True,
-                    color=colour,
-                    linewidth=0.6,
-                )
+                ax.quiver(*O.T, *D.T, length=far,
+                          normalize=True, color=colour, linewidth=0.6)
+
             elif ray_mode == "lines":
-                segs = np.stack([O, O + ray_len * D], axis=1)
+                segs = np.stack([O, O + far * D], axis=1)  # (N,2,3)
                 ax.add_collection3d(Line3DCollection(segs, colors=colour, lw=0.6))
-            elif ray_mode == "points":
-                ts = np.linspace(
-                    t_near, t_far, getattr(cam, "n_points_per_ray", 20)
-                )
-                P = (O[:, None, :] + ts[None, :, None] * D[:, None, :]).reshape(-1, 3)
-                ax.scatter(*P.T, s=2, c=colour, depthshade=False)
-            else:
+
+            else:  # should never happen due to Literal type
                 raise ValueError("ray_mode must be 'lines', 'quiver', or 'points'")
 
-    # ---------- gridlines ----------------------------------------------------
+    # ── lattice grid lines (optional) ──────────────────────────────────────
     if grid_lines:
         grid3d(ax, bounds=grid_bounds, step=grid_step)
 
-    # ---------- unified axis style ------------------------------------------
-    style_3d_axis(
-        ax,
-        invert=("x",) if invert_x else (),
-        elev=elev,
-        azim=azim,
-    )
+    # ── axis styling & legend ──────────────────────────────────────────────
+    style_3d_axis(ax,
+                  invert=("x",) if invert_x else (),
+                  elev=elev, azim=azim)
 
     if ax.get_legend_handles_labels()[1]:
-        ax.legend(loc="upper right")
+        ax.legend(loc="upper right", frameon=False)
 
     plt.tight_layout()
     plt.show()

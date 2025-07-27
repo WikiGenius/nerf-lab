@@ -12,9 +12,11 @@ class IntrinsicsCfg:
 
 @dataclass(frozen=True)
 class RaySampleCfg:
-    t_near: float = 10
+    # t_near: float = 10
+    t_near: float = 2
     # t_far:  float = 5.0
-    t_far:  float = 15
+    # t_far:  float = 15
+    t_far:  float = 4
     # N: int = 5
     N: int = 20
     deterministic: bool = False
