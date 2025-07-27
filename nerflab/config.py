@@ -19,16 +19,10 @@ class RaySampleCfg:
     N: int = 20
     deterministic: bool = False
 
-@dataclass(frozen=True)
-class PlotCfg:
-    step: int = 40
-    mode: str = "lines"       # or "points"
 
 # One top-level immutable bundle if you like
 @dataclass(frozen=True)
 class Cfg:
     intrinsics: IntrinsicsCfg = IntrinsicsCfg()
     rays: RaySampleCfg        = RaySampleCfg()
-    plot: PlotCfg             = PlotCfg()
-
 CFG = Cfg()
