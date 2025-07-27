@@ -1,0 +1,120 @@
+# ---------------------------------------------------------------------------
+# Core Python artefacts
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.dylib
+*.egg
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+*.manifest
+*.spec
+
+# Byte‑code cache (PEP 3147) in older interpreters
+*/__pycache__/
+
+# ---------------------------------------------------------------------------
+# Virtual‑envs & packaging
+# ---------------------------------------------------------------------------
+.venv/
+env/
+venv/
+.conda/
+*.conda
+*.whl
+*.egg
+# Poetry / PDM / Hatch local data
+.cache/
+.python-version
+# pip tools
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ---------------------------------------------------------------------------
+# Jupyter / IPython
+# ---------------------------------------------------------------------------
+.ipynb_checkpoints/
+profile_default/
+.ipython/
+
+# ---------------------------------------------------------------------------
+# Editors & IDEs
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.sublime-*
+*.code-workspace
+
+# ---------------------------------------------------------------------------
+# Testing & type‑checking
+# ---------------------------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+coverage.xml
+htmlcov/
+.cache/pytest/
+.tox/
+.nox/
+.pyre/
+
+# ---------------------------------------------------------------------------
+# Docs
+# ---------------------------------------------------------------------------
+_site/
+build/docs/
+docs/_build/
+
+# ---------------------------------------------------------------------------
+# Data, models, figures (edit to taste)
+# ---------------------------------------------------------------------------
+*.h5
+*.hdf5
+*.ckpt
+*.pth
+*.pt
+*.npz
+*.npy
+*.csv
+*.tsv
+*.log
+*.db
+*.sqlite3
+*.pickle
+*.pkl
+*.joblib
+
+# large rendered images / videos (optional)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+*.mov
+*-render*.*
+# keep small illustrative figures:
+!docs/img/**
+!examples/**/figures/**
+
+# ---------------------------------------------------------------------------
+# Matplotlib and other runtime junk
+# ---------------------------------------------------------------------------
+matplotlib‑cache/
+__results__/
+
+# ---------------------------------------------------------------------------
+# OS‑level cruft
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+.Spotlight‑V100
+.Trashes
+*.swp
+*.swo
