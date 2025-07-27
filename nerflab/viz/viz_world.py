@@ -27,6 +27,9 @@ def plot_world(
     figsize: Tuple[int, int] | None = None,
     elev: float | None = None,
     azim: float | None = None,
+    t_near: float | None = None,
+    t_far: float | None = None,
+    
 ) -> None:
     """
     Visualise a `World` with optional `Camera` objects.
@@ -68,8 +71,11 @@ def plot_world(
     # ---------- cameras & rays ----------------------------------------------
     if cameras:
         for i, cam in enumerate(cameras):
+            t_near = cam.t_near if t_near is None else t_near
+            t_far = cam.t_far if t_far is None else t_far
+            
             cam_pos = cam.H_wc[:3, 3]
-            ray_len = cam.t_far
+            ray_len = t_far
             colour = f"C{i % 10}"
 
             ax.scatter(
@@ -100,7 +106,7 @@ def plot_world(
                 ax.add_collection3d(Line3DCollection(segs, colors=colour, lw=0.6))
             elif ray_mode == "points":
                 ts = np.linspace(
-                    cam.t_near, cam.t_far, getattr(cam, "n_points_per_ray", 20)
+                    t_near, t_far, getattr(cam, "n_points_per_ray", 20)
                 )
                 P = (O[:, None, :] + ts[None, :, None] * D[:, None, :]).reshape(-1, 3)
                 ax.scatter(*P.T, s=2, c=colour, depthshade=False)

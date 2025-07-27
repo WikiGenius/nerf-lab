@@ -4,9 +4,11 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from typing import Tuple, Literal
 from nerflab.utils import invert_T
+from typing import Literal, Optional, Tuple
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from nerflab.viz.viz_config import viz_cfg  # global viz settings
 from nerflab.viz.axis import style_3d_axis, axis_triad
+
 
 # ---------- Intrinsics ----------
 @dataclass(frozen=True)
@@ -108,64 +110,97 @@ class Camera:
     # --------------------------------------------------------------------------- #
     #  Ray visualiser
     # --------------------------------------------------------------------------- #
-    def plot_rays(
+    def plot_rays(  # noqa: C901  (cyclomatic okay for a UI helper)
         self,
         *,
         frame: Literal["camera", "world"] = "world",
-        step: int | None = None,
+        step: Optional[int] = None,
         mode: Literal["lines", "quiver", "points"] | None = None,
-        color: str | None = None,
+        color: Optional[str] = None,
         point_size: float = 6.0,
+        points: Optional[np.ndarray] = None,  # required when mode=="points"
         draw_axes: bool = True,
         draw_world_axes: bool = True,
     ) -> None:
         """
-        Visualise a sparse set of rays cast by this camera.
+        Visualise this camera’s rays or an external point cloud.
 
-        All parameters default to the project‑wide `viz.cfg`.
+        Parameters
+        ----------
+        frame  : "camera" or "world" — coordinate frame used throughout.
+        step   : Sub‑sampling stride for rays; ignored when mode=="points".
+        mode   : "lines", "quiver", or "points". Defaults to `viz_cfg.ray_mode`.
+        color  : Matplotlib colour. Defaults to "C0".
+        point_size : Marker size (px) for point cloud rendering.
+        points : External point cloud **required** if mode=="points".
+                Accepts either shape (M,3) or (R,N,3).
+        draw_axes       : Draw camera pose axes (only if frame=="world").
+        draw_world_axes : Draw RGB triad at world origin.
         """
-        # ----------------------- cfg‑driven defaults ----------------------------
+        # --------------------------------------------------------------------- #
+        # Resolve defaults & validate
+        # --------------------------------------------------------------------- #
         step = viz_cfg.ray_step if step is None else step
         mode = viz_cfg.ray_mode if mode is None else mode
         color = "C0" if color is None else color
 
-        # ------------------------- compute ray data ----------------------------
-        O, D = self.get_rays(frame=frame, step=step, normalize=True)
-        ray_len = self.t_far
+        if mode == "points":
+            if points is None:
+                raise ValueError("`points` must be provided when mode=='points'.")
+            # Convert to (M,3) float array
+            P = np.asarray(points[::step], dtype=np.float32).reshape(-1, 3)
+            if P.shape[1] != 3:
+                raise ValueError("`points` must have a last dimension of size 3.")
 
-        # ---------------------------- figure -----------------------------------
+        # --------------------------------------------------------------------- #
+        # Figure / axis setup
+        # --------------------------------------------------------------------- #
         fig = plt.figure(figsize=viz_cfg.figsize, dpi=viz_cfg.dpi)
         ax = fig.add_subplot(111, projection="3d")
 
-        # ---------------------- draw rays in chosen mode -----------------------
-        if mode == "quiver":
-            ax.quiver(
-                *O.T, *D.T, length=ray_len, normalize=True, color=color, linewidth=0.6
-            )
-
-        elif mode == "lines":
-            segs = np.stack([O, O + ray_len * D], axis=1)  # (N,2,3)
-            ax.add_collection3d(Line3DCollection(segs, colors=color, lw=0.7))
-
-        elif mode == "points":
-            ts = np.linspace(self.t_near, self.t_far, getattr(self, "n_points_per_ray", 20))
-            P = (O[:, None, :] + ts[None, :, None] * D[:, None, :]).reshape(-1, 3)
+        # --------------------------------------------------------------------- #
+        # Draw content
+        # --------------------------------------------------------------------- #
+        if mode == "points":
             ax.scatter(*P.T, s=point_size, c=color, depthshade=False)
 
         else:
-            raise ValueError("mode must be 'lines', 'quiver', or 'points'")
+            # Ray origins (O) and directions (D), subsampled
+            O, D = self.get_rays(frame=frame, step=step, normalize=True)
+            ray_len = self.t_far
 
-        # --------------------------- camera markers ----------------------------
+            if mode == "quiver":
+                ax.quiver(
+                    *O.T,
+                    *D.T,
+                    length=ray_len,
+                    normalize=True,
+                    color=color,
+                    linewidth=0.6,
+                )
+            elif mode == "lines":
+                segs = np.stack([O, O + ray_len * D], axis=1)  # (N,2,3)
+                ax.add_collection3d(Line3DCollection(segs, colors=color, lw=0.7))
+            else:  # should never happen thanks to type hints
+                raise ValueError("mode must be 'lines', 'quiver', or 'points'")
+
+        # --------------------------------------------------------------------- #
+        # Camera marker & optional axes
+        # --------------------------------------------------------------------- #
         if frame == "world":
             cam_pos = self.H_wc[:3, 3]
-            ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
+            ax.scatter(
+                *cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam"
+            )
             if draw_axes:
-                self._draw_pose_axes(ax, self.H_wc, scale=ray_len * 0.2)
+                self._draw_pose_axes(ax, self.H_wc, scale=self.t_far * 0.2)
 
         if draw_world_axes:
             axis_triad(ax, length=viz_cfg.axis_triad_len)
 
-        # -------------------------- axis styling -------------------------------
+        # --------------------------------------------------------------------- #
+        # Axis styling & legend
+        # --------------------------------------------------------------------- #
         style_3d_axis(
             ax,
             invert=viz_cfg.axis_invert,
