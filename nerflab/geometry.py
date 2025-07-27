@@ -1,57 +1,76 @@
-# ---------- Geometry ----------
-class Box:
-    def __init__(self, center, size):
-        """
-        Initialize a 3D box.
-        :param center: Tuple (cx, cy, cz) for the box center.
-        :param size: Tuple (width, height, depth) for the box dimensions.
-        """
-        self.cx, self.cy, self.cz = center
-        self.w, self.h, self.d = size
-        self.min_x = self.cx - self.w / 2
-        self.max_x = self.cx + self.w / 2
-        self.min_y = self.cy - self.h / 2
-        self.max_y = self.cy + self.h / 2
-        self.min_z = self.cz - self.d / 2
-        self.max_z = self.cz + self.d / 2
+# nerflab/geometry.py
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Sequence
+import numpy as np
 
-    def density(self, x, y, z):
-        if (self.min_x <= x <= self.max_x and
-            self.min_y <= y <= self.max_y and
-            self.min_z <= z <= self.max_z):
-            return float('inf')
-        else:
-            return 0.0
+# --------------------------------------------------------------------------- #
+# Base class
+# --------------------------------------------------------------------------- #
+class Shape(ABC):
+    """Abstract geometric primitive."""
 
-class Sphere:
-    def __init__(self, center, radius):
-        """
-        Initialize a sphere.
-        :param center: Tuple (x, y, z) for the sphere center.
-        :param radius: Radius of the sphere.
-        """
-        self.cx, self.cy, self.cz = center
-        self.radius = radius
+    @abstractmethod
+    def density(self, x: float, y: float, z: float) -> float:
+        """Return +∞ inside the object, 0 outside (NeRF style)."""
+        raise NotImplementedError
 
-    def density(self, x, y, z):
-        dx = x - self.cx
-        dy = y - self.cy
-        dz = z - self.cz
-        distance_squared = dx*dx + dy*dy + dz*dz
-        if distance_squared <= self.radius * self.radius:
-            return float('inf')
-        else:
-            return 0.0
 
-class World:
-    def __init__(self):
-        self.shapes = []
+# --------------------------------------------------------------------------- #
+# Concrete primitives
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Box(Shape):
+    center: Sequence[float]  # (cx, cy, cz)
+    size:   Sequence[float]  # (width, height, depth)
 
-    def add_shape(self, shape):
-        self.shapes.append(shape)
+    def __post_init__(self):
+        cx, cy, cz = self.center
+        w,  h,  d  = self.size
+        object.__setattr__(self, "bounds", (
+            (cx - w / 2, cx + w / 2),
+            (cy - h / 2, cy + h / 2),
+            (cz - d / 2, cz + d / 2),
+        ))
+    
+    # Public API
+    # --------------------------------------------------------------------- #
+    def density(self, x: float, y: float, z: float) -> float:
+        (xmin, xmax), (ymin, ymax), (zmin, zmax) = self.bounds
+        inside = xmin <= x <= xmax and ymin <= y <= ymax and zmin <= z <= zmax
+        return float("inf") if inside else 0.0
 
-    def density(self, x, y, z):
-        for shape in self.shapes:
-            if shape.density(x, y, z) == float('inf'):
-                return float('inf')
+
+@dataclass(frozen=True)
+class Sphere(Shape):
+    center: Sequence[float]  # (cx, cy, cz)
+    radius: float
+
+    # --------------------------------------------------------------------- #
+    def density(self, x: float, y: float, z: float) -> float:
+        cx, cy, cz = self.center
+        if (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 <= self.radius ** 2:
+            return float("inf")
         return 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Scene container
+# --------------------------------------------------------------------------- #
+class World:
+    """Collection of Shape objects with an aggregated density query."""
+
+    def __init__(self):
+        self.shapes: list[Shape] = []
+
+    # fluent interface – allows chaining: world.add_shape(...).add_shape(...)
+    def add_shape(self, shape: Shape) -> "World":
+        self.shapes.append(shape)
+        return self
+
+    def density(self, x: float, y: float, z: float) -> float:
+        """Return +∞ if any shape occupies (x,y,z), else 0."""
+        return float("inf") if any(
+            np.isinf(s.density(x, y, z)) for s in self.shapes
+        ) else 0.0

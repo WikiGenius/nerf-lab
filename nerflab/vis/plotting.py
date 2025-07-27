@@ -17,9 +17,11 @@ def plot_box(ax, box, alpha: float = 0.15, edgecolor: str = 'k', facecolor: str 
     ----------
     box : has attributes min_x,max_x,min_y,max_y,min_z,max_z
     """
-    x = [box.min_x, box.max_x]
-    y = [box.min_y, box.max_y]
-    z = [box.min_z, box.max_z]
+    (xmin, xmax), (ymin, ymax), (zmin, zmax) = box.bounds
+
+    x = [xmin, xmax]
+    y = [ymin, ymax]
+    z = [zmin, zmax]
     verts = np.array([[x[i], y[j], z[k]]
                       for i in (0, 1)
                       for j in (0, 1)
@@ -44,9 +46,10 @@ def plot_sphere(ax, sphere, alpha: float = 0.15, res: int = 30, color: str = 'C1
     """
     u = np.linspace(0, 2 * np.pi, res)
     v = np.linspace(0, np.pi, res)
-    x = sphere.cx + sphere.radius * np.outer(np.cos(u), np.sin(v))
-    y = sphere.cy + sphere.radius * np.outer(np.sin(u), np.sin(v))
-    z = sphere.cz + sphere.radius * np.outer(np.ones_like(u), np.cos(v))
+    cx, cy, cz = sphere.center
+    x = cx + sphere.radius * np.outer(np.cos(u), np.sin(v))
+    y = cy + sphere.radius * np.outer(np.sin(u), np.sin(v))
+    z = cz + sphere.radius * np.outer(np.ones_like(u), np.cos(v))
     ax.plot_surface(x, y, z, linewidth=0, antialiased=False,
                     alpha=alpha, edgecolor='none', color=color)
 
