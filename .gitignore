@@ -13,7 +13,7 @@ build/
 pip-wheel-metadata/
 *.manifest
 *.spec
-
+tests
 # Byte‑code cache (PEP 3147) in older interpreters
 */__pycache__/
 
