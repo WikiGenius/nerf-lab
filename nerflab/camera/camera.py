@@ -7,46 +7,53 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-from .intrinsics import Intrinsics
 
+from .intrinsics import Intrinsics
 from .transforms import invert_T
 from ..viz.axis import style_3d_axis, axis_triad
 from ..config.viz_config import viz_cfg
-from ..config.config import CFG
 from .sampling import stratified_samples_batch
+from ..config.config import CFG  
 
-
-
-# ==========================================================================
-# Camera (CFG-agnostic, torch-first, batched)
-# ==========================================================================
 class Camera:
     """
-    Minimal pinhole camera with batched pose support.
+    Minimal pinhole camera with optional batching.
 
-    Args
-    ----
-    intr : Intrinsics
-        Camera intrinsics (no CFG dependency here).
-    H_wc : (4,4) or (B,4,4)
-        Camera→World homogeneous transform(s).
-    t_bounds : (near, far)
-        Near/Far limits used for visualization and optional sampling helpers.
-    n_points_per_ray : int
-        Default number of samples per ray for convenience helpers.
-    device / dtype :
-        Overrides for pose tensor conversion if H_wc is not a tensor.
+    This class generates rays and sampled points for NeRF-style rendering.
+    If constructor parameters are omitted, it falls back to values from the
+    global `CFG` (intrinsics, near/far bounds, and samples-per-ray).
 
-    Notes
-    -----
-    • Class never imports CFG. If you want CFG-driven sampling, use your
-      `stratified_samples_batch` (which can import CFG internally) via
-      `sample_along_rays`.
-    • Methods return (R,3) for single pose and (B,R,3) for batched.
+    Args:
+        H_wc (Tensor | ndarray): Camera-to-World pose(s), shape (4,4) or (B,4,4).
+        intr (Intrinsics, optional): Camera intrinsics. If None, uses CFG.intrinsics.
+        t_bounds (tuple[float, float], optional): (t_near, t_far). If None, uses CFG.rays.
+        n_points_per_ray (int, optional): Default samples per ray. If None, uses CFG.rays.N.
+        device (torch.device, optional): Device for internal tensors.
+        dtype (torch.dtype): Dtype for internal tensors (default: torch.float32).
+
+    Notes:
+        • Returns are batched when H_wc is batched.
+        • Ray directions follow camera convention: +x right, +y up, -z forward.
+
+    Key methods:
+        get_rays(frame="world", step=1, normalize=True)
+            -> origins, dirs with shapes (R,3) or (B,R,3).
+
+        get_rays_sampled(rays_per_pose=None | K, indices=None, ...)
+            -> subset of rays per pose, by count or explicit indices.
+
+        sample_along_rays(O, D, deterministic=None)
+            -> (t_vals, deltas, points) with shapes
+            (R,N),(R,N),(R,N,3) or (B,R,N),(B,R,N),(B,R,N,3).
+
+        plot_rays(...), plot_samples(...)
+            -> Matplotlib helpers for quick inspection.
+
+    Raises:
+        ValueError: If input shapes are invalid or parameters are out of range.
     """
 
 
-    # ── construction ─────────────────────────────────────────────────────
     def __init__(
         self,
         H_wc: Union[torch.Tensor, np.ndarray],
@@ -57,33 +64,37 @@ class Camera:
         device: Optional[torch.device] = None,
         dtype: torch.dtype = torch.float32,
     ):
-        # 0) Defaults from CFG if not provided
+        # --- defaults from CFG if None ---
         if intr is None:
             ic = CFG.intrinsics
-            intr = Intrinsics(fx=float(ic.fx), fy=float(ic.fy),
-                              width=int(ic.width), height=int(ic.height))
+            intr = Intrinsics(
+                fx=float(ic.fx), fy=float(ic.fy),
+                width=int(ic.width), height=int(ic.height)
+            )
         if t_bounds is None:
-            t_bounds = (float(CFG.rays.t_near), float(CFG.rays.t_far))
+            rc = CFG.rays
+            t_bounds = (float(rc.t_near), float(rc.t_far))
         if n_points_per_ray is None:
             n_points_per_ray = int(CFG.rays.N)
 
-        # 1) Store intrinsics
+        # store intrinsics
         self.intr = intr
 
-        # 2) Poses
+        # poses
         self.H_wc = torch.as_tensor(H_wc, device=device, dtype=dtype)
         if self.H_wc.shape[-2:] != (4, 4):
-            raise ValueError("H_wc must have shape (..., 4, 4)")
-        self.H_cw = invert_T(self.H_wc)  # must support (4,4) and (B,4,4)
+            raise ValueError(f"H_wc must have shape (...,4,4), got {self.H_wc.shape}")
+        self.H_cw = invert_T(self.H_wc)
 
-        # 3) Scalars
+        # scalars
         self.t_near, self.t_far = map(float, t_bounds)
         self.n_points_per_ray = int(n_points_per_ray)
 
-        # 4) Lazy caches (per-resolution & step)
-        self._grid_cache_key: Optional[tuple[int, int, int]] = None
+        # pixel-grid caches
+        self._grid_cache_key: Optional[tuple[int, int, int, str, str]] = None
         self._u_cache: Optional[torch.Tensor] = None
         self._v_cache: Optional[torch.Tensor] = None
+
 
     # ── properties ───────────────────────────────────────────────────────
     @property
@@ -104,7 +115,7 @@ class Camera:
         normalize: bool = True,
         *,
         device: Optional[torch.device] = None,
-        dtype: torch.dtype = torch.float32,
+        dtype: Optional[torch.dtype] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Generate rays for the (optionally strided) pixel grid.
@@ -120,16 +131,16 @@ class Camera:
 
         # default to pose's device/dtype
         device = device or self.H_wc.device
-        dtype  = dtype  or self.H_wc.dtype
+        dtype = dtype or self.H_wc.dtype
 
         # (R,), (R,) pixel coordinates & camera-frame directions (R,3)
-        u, v   = self._pixel_grid(step=step, device=device, dtype=dtype)
-        dirs_c = self._dirs_cam(u, v, normalize=normalize)
+        u, v = self._pixel_grid(step=step, device=device, dtype=dtype)
+        dirs_c = self._dirs_cam(u, v, normalize=normalize).to(device=device, dtype=dtype)
 
         if frame == "camera":
             if self._is_batched:
                 R = dirs_c.shape[0]
-                O = torch.zeros((self.B, R, 3), device=self.H_wc.device, dtype=self.H_wc.dtype)
+                O = torch.zeros((self.B, R, 3), device=device, dtype=dtype)
                 D = dirs_c.expand(self.B, -1, -1)  # (B, R, 3)
                 return O, D
             # single pose
@@ -142,19 +153,18 @@ class Camera:
 
         if self._is_batched:
             # dirs_c: (R,3) → (B,R,3)
-            D = torch.einsum('bij,rj->bri', R_wc, dirs_c)
+            D = torch.einsum('bij,rj->bri', R_wc, dirs_c)  # (B,R,3)
             if normalize:
                 D = D / D.norm(dim=-1, keepdim=True).clamp_min(1e-12)
             O = t_wc[:, None, :].expand(-1, D.shape[1], -1)  # (B, R, 3)
-            return O, D
+            return O.to(device=device, dtype=dtype), D.to(device=device, dtype=dtype)
 
         # single pose
         D = (R_wc @ dirs_c.T).T  # (R,3)
         if normalize:
             D = D / D.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         O = t_wc.expand_as(D)    # (R,3)
-        return O, D
-
+        return O.to(device=device, dtype=dtype), D.to(device=device, dtype=dtype)
 
     # ==========================================================================
     # Rays — sampled per pose (random indices or explicit indices)
@@ -163,7 +173,7 @@ class Camera:
     def get_rays_sampled(
         self,
         *,
-        rays_per_pose: Optional[int] = None,         # None → default to CFG.rays.R
+        rays_per_pose: Optional[int] = None,         # None → all rays
         frame: Literal["camera", "world"] = "world",
         step: int = 1,
         normalize: bool = True,
@@ -177,11 +187,11 @@ class Camera:
 
         Priority:
         1) If `indices` is provided, use it directly (ignores `rays_per_pose`).
-        2) Else if `rays_per_pose` is None, use CFG.rays.R (clamped to available R).
-        3) Else sample exactly `rays_per_pose`.
+        2) Else if `rays_per_pose` is None, return all rays.
+        3) Else sample exactly `rays_per_pose` per pose.
         """
         O, D = self.get_rays(frame=frame, step=step, normalize=normalize,
-                            device=device, dtype=dtype)
+                             device=device, dtype=dtype)
 
         # ── explicit indices ──────────────────────────────────────────────────
         if indices is not None:
@@ -189,53 +199,41 @@ class Camera:
                 B, R, _ = O.shape
                 if indices.ndim != 2 or indices.shape[0] != B:
                     raise ValueError("indices must be (B, K) for batched sampling")
-                idx   = indices.to(device=O.device, dtype=torch.long)
-                idx3  = idx.unsqueeze(-1).expand(-1, -1, 3)
-                O_sel = torch.gather(O, 1, idx3)
-                D_sel = torch.gather(D, 1, idx3)
-                return O_sel, D_sel
+                idx = indices.to(device=O.device, dtype=torch.long)
+                idx3 = idx.unsqueeze(-1).expand(-1, -1, 3)
+                return torch.gather(O, 1, idx3), torch.gather(D, 1, idx3)
             # single
             if indices.ndim != 1:
                 raise ValueError("indices must be (K,) for unbatched sampling")
             idx = indices.to(device=O.device, dtype=torch.long)
             return O.index_select(0, idx), D.index_select(0, idx)
 
-        # ── decide K (default from CFG and clamp) ─────────────────────────────
+        # ── decide K ──────────────────────────────────────────────────────────
+        if rays_per_pose is None:
+            return O, D  # all rays
+
         if self._is_batched:
             B, R, _ = O.shape
-            if rays_per_pose is None:
-                from ..config.config import CFG
-                K = int(min(int(CFG.rays.R), R))
-            else:
-                K = int(rays_per_pose)
+            K = int(rays_per_pose)
             if not (1 <= K <= R):
                 raise ValueError(f"rays_per_pose must be in [1, {R}] (got {K})")
             if K == R:
                 return O, D
-
             # Random per-pose without replacement (uniform)
-            probs = torch.full((B, R), 1.0 / R, device=O.device, dtype=O.dtype)
-            idx   = torch.multinomial(probs, num_samples=K, replacement=False).to(torch.long)  # (B, K)
-            idx3  = idx.unsqueeze(-1).expand(-1, -1, 3)
-            O_sel = torch.gather(O, 1, idx3)
-            D_sel = torch.gather(D, 1, idx3)
-            return O_sel, D_sel
+            probs = torch.full((B, R), 1.0 / R, device=O.device, dtype=torch.float32)
+            idx = torch.multinomial(probs, num_samples=K, replacement=False).to(torch.long)  # (B, K)
+            idx3 = idx.unsqueeze(-1).expand(-1, -1, 3)
+            return torch.gather(O, 1, idx3), torch.gather(D, 1, idx3)
 
         # single pose
         R = O.shape[0]
-        if rays_per_pose is None:
-            from ..config.config import CFG
-            K = int(min(int(CFG.rays.R), R))
-        else:
-            K = int(rays_per_pose)
+        K = int(rays_per_pose)
         if not (1 <= K <= R):
             raise ValueError(f"rays_per_pose must be in [1, {R}] (got {K})")
         if K == R:
             return O, D
-
         idx = torch.randperm(R, generator=generator, device=O.device)[:K]
         return O.index_select(0, idx), D.index_select(0, idx)
-
 
     # ==========================================================================
     # Sampling along rays — using your existing sampler (CFG-friendly)
@@ -250,13 +248,12 @@ class Camera:
         deterministic: Optional[bool] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Wrapper around nerflab.learning.stratified_samples_batch.
+        Wrapper around nerflab.sampling.stratified_samples_batch.
 
         Supports:
         • Unbatched:  O,D ∈ (R, 3)      → (R, N), (R, N), (R, N, 3)
         • Batched:    O,D ∈ (B, R, 3)   → (B, R, N), (B, R, N), (B, R, N, 3)
         """
-        # light guardrail
         if O.shape != D.shape or O.shape[-1] != 3:
             raise ValueError(f"O and D must share shape (..., 3); got O{O.shape}, D{D.shape}")
 
@@ -266,10 +263,10 @@ class Camera:
             return stratified_samples_batch(O, D, rng=rng, deterministic=det)
 
         if O.ndim == 3:  # (B,R,3)
-            B, R, _   = O.shape
-            Of, Df    = O.reshape(-1, 3), D.reshape(-1, 3)
+            B, R, _ = O.shape
+            Of, Df = O.reshape(-1, 3), D.reshape(-1, 3)
             t, dlt, P = stratified_samples_batch(Of, Df, rng=rng, deterministic=det)
-            N         = t.shape[-1]
+            N = t.shape[-1]
             return t.view(B, R, N), dlt.view(B, R, N), P.view(B, R, N, 3)
 
         raise ValueError("O and D must be (R,3) or (B,R,3)")
@@ -310,14 +307,14 @@ class Camera:
                 P = P.reshape(-1, 3)
             if P.shape[-1] != 3:
                 raise ValueError("`points` last dim must be 3")
-            P_np = P[::step].cpu().numpy()
+            P_np = P[::step].detach().cpu().numpy()
             ax.scatter(*P_np.T, s=point_size, c=color, depthshade=False)
         else:
             O, D = self.get_rays(frame=frame, step=step, normalize=True)
             if self._is_batched:
                 O, D = O[cam_index], D[cam_index]
             ray_len = float(self.t_far)
-            O_np, D_np = O.cpu().numpy(), D.cpu().numpy()
+            O_np, D_np = O.detach().cpu().numpy(), D.detach().cpu().numpy()
 
             if mode == "quiver":
                 ax.quiver(*O_np.T, *D_np.T, length=ray_len, normalize=True, color=color, linewidth=0.6)
@@ -387,7 +384,7 @@ class Camera:
             if show_rays:
                 Oi, Di = O[cam_index], D[cam_index]
                 ray_len = float(self.t_far)
-                O_np, D_np = Oi.cpu().numpy(), Di.cpu().numpy()
+                O_np, D_np = Oi.detach().cpu().numpy(), Di.detach().cpu().numpy()
                 segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
                 ax.add_collection3d(Line3DCollection(segs, colors="C0", lw=0.6))
 
@@ -402,7 +399,7 @@ class Camera:
 
             if show_rays:
                 ray_len = float(self.t_far)
-                O_np, D_np = O.cpu().numpy(), D.cpu().numpy()
+                O_np, D_np = O.detach().cpu().numpy(), D.detach().cpu().numpy()
                 segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
                 ax.add_collection3d(Line3DCollection(segs, colors="C0", lw=0.6))
 
@@ -441,11 +438,12 @@ class Camera:
         Camera-frame directions for pixel coords (u,v).
         Convention: +x right, +y up, -z forward.
         """
-        fx, fy, cx, cy = self.intr.fx, self.intr.fy, self.intr.cx, self.intr.cy
-        one = torch.ones_like(u, device=self.H_wc.device, dtype=self.H_wc.dtype)
+        # keep scalar intrinsics as floats; cast tensor pieces explicitly
+        fx, fy, cx, cy = float(self.intr.fx), float(self.intr.fy), float(self.intr.cx), float(self.intr.cy)
+        one = torch.ones_like(u)
         dirs = torch.stack([
-            (u.to(self.H_wc.dtype) - cx) / fx,
-            -(v.to(self.H_wc.dtype) - cy) / fy,
+            (u - cx) / fx,
+            -(v - cy) / fy,
             -one
         ], dim=-1)  # (R,3)
 
@@ -453,13 +451,27 @@ class Camera:
             dirs = dirs / dirs.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         return dirs
 
-    def _pixel_grid(self, step: int = 1, *, device=None, dtype=torch.float32) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _pixel_grid(
+        self,
+        step: int = 1,
+        *,
+        device: Optional[torch.device] = None,
+        dtype: torch.dtype = torch.float32
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Flattened pixel grid (u,v) with stride = step."""
-        H, W = self.intr.height, self.intr.width
+        H, W = int(self.intr.height), int(self.intr.width)
+        key = (H, W, int(step), str(device), str(dtype))
+        if key == self._grid_cache_key and self._u_cache is not None and self._v_cache is not None:
+            return self._u_cache, self._v_cache
+
         v = torch.arange(0, H, step, device=device, dtype=dtype)
         u = torch.arange(0, W, step, device=device, dtype=dtype)
         vv, uu = torch.meshgrid(v, u, indexing="ij")
-        return uu.reshape(-1), vv.reshape(-1)
+
+        self._grid_cache_key = key
+        self._u_cache = uu.reshape(-1)
+        self._v_cache = vv.reshape(-1)
+        return self._u_cache, self._v_cache
 
     @staticmethod
     def _draw_pose_axes(ax, T: torch.Tensor, scale: float = 0.1):
