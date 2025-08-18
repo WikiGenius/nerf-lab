@@ -16,6 +16,7 @@ pip-wheel-metadata/
 tests
 # Byte‑code cache (PEP 3147) in older interpreters
 */__pycache__/
+*.pyc
 
 # ---------------------------------------------------------------------------
 # Virtual‑envs & packaging
@@ -118,3 +119,6 @@ Icon?
 .Trashes
 *.swp
 *.swo
+
+
+.ruff_cache/
