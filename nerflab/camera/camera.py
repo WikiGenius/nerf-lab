@@ -246,30 +246,39 @@ class Camera:
         *,
         rng: Optional[torch.Generator] = None,
         deterministic: Optional[bool] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ):
         """
         Wrapper around nerflab.sampling.stratified_samples_batch.
 
         Supports:
-        • Unbatched:  O,D ∈ (R, 3)      → (R, N), (R, N), (R, N, 3)
-        • Batched:    O,D ∈ (B, R, 3)   → (B, R, N), (B, R, N), (B, R, N, 3)
+        • Unbatched:  O,D ∈ (R, 3)    → (R, N), (R, N), (R, N, 3)
+        • Batched:    O,D ∈ (B,R, 3)  → (B,R,N), (B,R,N), (B,R,N,3)
         """
         if O.shape != D.shape or O.shape[-1] != 3:
             raise ValueError(f"O and D must share shape (..., 3); got O{O.shape}, D{D.shape}")
 
         det = bool(deterministic) if deterministic is not None else False
 
+        # Pull config from *this* camera (set in __init__)
+        t_near = self.t_near
+        t_far  = self.t_far
+        N      = self.n_points_per_ray
+
         if O.ndim == 2:  # (R,3)
-            return stratified_samples_batch(O, D, rng=rng, deterministic=det)
+            return stratified_samples_batch(
+                O, D, t_near=t_near, t_far=t_far, N=N, rng=rng, deterministic=det
+            )
 
         if O.ndim == 3:  # (B,R,3)
             B, R, _ = O.shape
             Of, Df = O.reshape(-1, 3), D.reshape(-1, 3)
-            t, dlt, P = stratified_samples_batch(Of, Df, rng=rng, deterministic=det)
-            N = t.shape[-1]
+            t, dlt, P = stratified_samples_batch(
+                Of, Df, t_near=t_near, t_far=t_far, N=N, rng=rng, deterministic=det
+            )
             return t.view(B, R, N), dlt.view(B, R, N), P.view(B, R, N, 3)
 
         raise ValueError("O and D must be (R,3) or (B,R,3)")
+
 
     # ==========================================================================
     # Visualization — rays
