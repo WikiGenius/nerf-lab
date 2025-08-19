@@ -103,6 +103,8 @@ class Camera:
         self._u_cache: Optional[torch.Tensor] = None
         self._v_cache: Optional[torch.Tensor] = None
 
+        self._rays_cache: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}
+        self._pose_version: int = 0  # bump when H_wc changes
 
     # ── properties ───────────────────────────────────────────────────────
     @property
@@ -139,7 +141,16 @@ class Camera:
 
         # default to pose's device/dtype
         device = device or self.H_wc.device
-        dtype = dtype or self.H_wc.dtype
+        dtype  = dtype  or self.H_wc.dtype
+
+        # --- cache lookup ---
+        key = self._rays_cache_key(
+            frame=frame, step=step, normalize=normalize, device=device, dtype=dtype
+        )
+        cached = self._rays_cache.get(key, None)
+        if cached is not None:
+            # return cached tensors (already on correct device/dtype)
+            return cached
 
         # (R,), (R,) pixel coordinates & camera-frame directions (R,3)
         u, v = self._pixel_grid(step=step, device=device, dtype=dtype)
@@ -150,10 +161,11 @@ class Camera:
                 R = dirs_c.shape[0]
                 O = torch.zeros((self.B, R, 3), device=device, dtype=dtype)
                 D = dirs_c.expand(self.B, -1, -1)  # (B, R, 3)
-                return O, D
-            # single pose
-            O = torch.zeros_like(dirs_c)  # (R, 3)
-            return O, dirs_c
+            else:
+                O = torch.zeros_like(dirs_c)  # (R, 3)
+                D = dirs_c
+            self._rays_cache[key] = (O, D)
+            return O, D
 
         # world-frame
         R_wc = self.H_wc[..., :3, :3]  # (3,3) or (B,3,3)
@@ -165,14 +177,19 @@ class Camera:
             if normalize:
                 D = D / D.norm(dim=-1, keepdim=True).clamp_min(1e-12)
             O = t_wc[:, None, :].expand(-1, D.shape[1], -1)  # (B, R, 3)
-            return O.to(device=device, dtype=dtype), D.to(device=device, dtype=dtype)
+        else:
+            D = (R_wc @ dirs_c.T).T  # (R,3)
+            if normalize:
+                D = D / D.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+            O = t_wc.expand_as(D)    # (R,3)
 
-        # single pose
-        D = (R_wc @ dirs_c.T).T  # (R,3)
-        if normalize:
-            D = D / D.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-        O = t_wc.expand_as(D)    # (R,3)
-        return O.to(device=device, dtype=dtype), D.to(device=device, dtype=dtype)
+        O = O.to(device=device, dtype=dtype)
+        D = D.to(device=device, dtype=dtype)
+
+        # --- store in cache and return ---
+        self._rays_cache[key] = (O, D)
+        return O, D
+
 
     # ==========================================================================
     # Rays — sampled per pose (random indices or explicit indices)
@@ -510,5 +527,60 @@ class Camera:
             p = o + R @ axes[:, i]
             ax.plot([o[0], p[0]], [o[1], p[1]], [o[2], p[2]], colors[i], lw=2)
 
+    # ---------------- Cache helpers ----------------
+    def _rays_cache_key(
+        self,
+        *,
+        frame: str,
+        step: int,
+        normalize: bool,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> tuple:
+        """Key that uniquely identifies a rays-computation state."""
+        # we use id(self.H_wc) + a monotonic _pose_version so that even in-place edits
+        # followed by set_poses() will invalidate; users should call set_poses() when changing poses
+        return (
+            id(self.H_wc),             # tensor identity
+            self._pose_version,        # bump on set_poses()
+            frame,
+            int(step),
+            bool(normalize),
+            str(device),
+            str(dtype),
+        )
 
+    def clear_cache(self) -> None:
+        """Clear all per-instance caches (rays + pixel grid)."""
+        self._rays_cache.clear()
+        self._grid_cache_key = None
+        self._u_cache = None
+        self._v_cache = None
+
+    def set_poses(self, H_wc: Union[torch.Tensor, np.ndarray], *, repair: bool = False) -> None:
+        """
+        Replace camera pose(s) and invalidate caches.
+        Accepts (4,4) or (B,4,4).
+        """
+        H_wc_t = torch.as_tensor(H_wc, device=self.H_wc.device, dtype=self.H_wc.dtype)
+        self.H_wc = validate_se3(H_wc_t, name="H_wc", repair=repair)
+        self.H_cw = invert_T(self.H_wc)
+        self._pose_version += 1
+        self._rays_cache.clear()  # invalidate rays (pixel grid cache still valid for same W,H,step)
+
+    def to(self, device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = None):
+        """
+        Move internal tensors to device/dtype. Invalidates ray cache because device/dtype is part of the key.
+        """
+        device = device or self.H_wc.device
+        dtype  = dtype  or self.H_wc.dtype
+        self.H_wc = self.H_wc.to(device=device, dtype=dtype)
+        self.H_cw = self.H_cw.to(device=device, dtype=dtype)
+        # pixel-grid caches depend on device/dtype too
+        self._rays_cache.clear()
+        self._grid_cache_key = None
+        self._u_cache = None
+        self._v_cache = None
+        return self
+    
 __all__ = ["Camera"]
