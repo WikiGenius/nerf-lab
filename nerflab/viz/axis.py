@@ -4,7 +4,7 @@ import numpy as np
 from typing import Sequence, Tuple, Iterable
 from matplotlib.axes import Axes
 
-from .viz_config import viz_cfg as VCFG
+from ..config.viz_config import viz_cfg as VCFG
 
 __all__ = [
     "set_equal",

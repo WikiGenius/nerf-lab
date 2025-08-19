@@ -16,12 +16,13 @@ _PUBLIC = {
     "primitives": ["plot_box", "plot_sphere"],
     "viz_world": ["plot_world"],
     "viz_sigma": ["viz_sigma_scatter", "viz_sigma_heatmap"],
-    "plot_cloud": ["plot_cloud_batch_with_camera"]
+    "plot_cloud": ["plot_cloud_batch_with_camera"],
+    "pose":["draw_pose_axes"]
 }
 
 __all__ = ["viz_cfg"] + [name for names in _PUBLIC.values() for name in names]
 
-from .viz_config import viz_cfg  # singleton
+from ..config.viz_config import viz_cfg  # singleton
 
 # --- lazy attribute loader --------------------------------------------------
 def __getattr__(name: str) -> Any:                     # noqa: D401

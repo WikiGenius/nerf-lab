@@ -1,7 +1,7 @@
 from __future__ import annotations
 import numpy as np
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from .viz_config import viz_cfg as VCFG
+from ..config.viz_config import viz_cfg as VCFG
 
 # --------------------------------------------------------------------------- #
 #  Pre‑computed constants (avoids reallocating every call)

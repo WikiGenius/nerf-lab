@@ -14,6 +14,7 @@ pip-wheel-metadata/
 *.manifest
 *.spec
 tests
+practice
 # Byte‑code cache (PEP 3147) in older interpreters
 */__pycache__/
 *.pyc
@@ -88,7 +89,7 @@ docs/_build/
 *.pickle
 *.pkl
 *.joblib
-
+data
 # large rendered images / videos (optional)
 *.png
 *.jpg

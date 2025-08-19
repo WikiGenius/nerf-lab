@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 from .intrinsics import Intrinsics
-from .transforms import invert_T
+from .transforms import invert_T, validate_se3
 from ..config.config import CFG
 from ..config.viz_config import viz_cfg
 from .sampling import stratified_samples_batch
@@ -85,9 +85,13 @@ class Camera:
         self.deterministic = bool(CFG.rays.deterministic)
         
         # poses
-        self.H_wc = torch.as_tensor(H_wc, device=device, dtype=dtype)
-        if self.H_wc.shape[-2:] != (4, 4):
-            raise ValueError(f"H_wc must have shape (...,4,4), got {self.H_wc.shape}")
+        # self.H_wc = torch.as_tensor(H_wc, device=device, dtype=dtype)
+        # if self.H_wc.shape[-2:] != (4, 4):
+        #     raise ValueError(f"H_wc must have shape (...,4,4), got {self.H_wc.shape}")
+        # self.H_cw = invert_T(self.H_wc)
+        # poses
+        H_wc_t = torch.as_tensor(H_wc, device=device, dtype=dtype)
+        self.H_wc = validate_se3(H_wc_t, name="H_wc", repair=False)  # set True if you prefer auto-fix
         self.H_cw = invert_T(self.H_wc)
 
         # scalars

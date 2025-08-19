@@ -4,8 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection  # keeps flake8 happy
 
-from nerflab.viz.viz_config import viz_cfg as VCFG
-from nerflab.viz.axis import style_3d_axis
+from ..config.viz_config import viz_cfg as VCFG
+from .axis import style_3d_axis
 
 
 # --------------------------------------------------------------------------- #

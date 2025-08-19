@@ -6,11 +6,11 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from typing import Iterable, Literal, Optional, Tuple
 
-from nerflab.geometry import Box, Sphere
-from nerflab import Camera
+from ..world.geometry import Box, Sphere
+from ..camera.camera import Camera
 from .primitives import plot_box, plot_sphere
 from .axis import style_3d_axis, axis_triad, grid3d
-from .viz_config import viz_cfg as CFG
+from ..config.viz_config import viz_cfg as CFG
 
 NDArray = np.ndarray
 

@@ -1,63 +1,35 @@
 """
-nerflab – lightweight helpers for NeRF and ray‑based experiments.
-
-Import convenience re‑exports live here so users can simply do:
->>> from nerflab import Camera, Box, stratified_samples_batch
+nerflab: minimal, modular tools for cameras, worlds, NeRF-style ops, and visualization.
+Public API stays compact; internals live under subpackages.
 """
-from __future__ import annotations
 
-# ------------------------------------------------------------------ #
-# Core utility & math helpers
-# ------------------------------------------------------------------ #
-from .utils import homogenize, dehomogenize, invert_T, distance, look_at   # noqa: F401
-from .camera import Intrinsics, Camera                                     # noqa: F401
-from .geometry import Box, Sphere, World                                   # noqa: F401
-from .sampling import stratified_samples_batch, cartesian_to_spherical     # noqa: F401
-from .render import nerf_opacity, nerf_opacity_single, sigma_from_world    # noqa: F401
+# ---- Version (optionally sync with pyproject.toml) ----
+__version__ = "0.1.0"
 
-# ------------------------------------------------------------------ #
-# Global configuration dataclasses
-# ------------------------------------------------------------------ #
-from .config import CFG, IntrinsicsCfg, RaySampleCfg              # noqa: F401
+# ---- Camera exports ----
+from .camera.camera import Camera
+from .camera.intrinsics import Intrinsics
+from . import camera as camera  # expose submodule (e.g., camera.presets)
 
-# ------------------------------------------------------------------ #
-# Visualisation façade  (lazy‑loaded via nerflab.viz.__getattr__)
-# ------------------------------------------------------------------ #
-from .viz import (
-    plot_world,
-    viz_sigma_scatter,
-    viz_sigma_heatmap,
-    viz_cfg as VizCFG,         # expose viz‑specific defaults separately
-)
+# ---- World exports ----
+from .world.geometry import Box, Sphere
+from .world.render import save_world, load_world
 
-# ------------------------------------------------------------------ #
-# Ready‑made demo / preset helpers
-# ------------------------------------------------------------------ #
-from .presets import make_pose_cases, pose_H                               # noqa: F401
+# ---- Learning (Torch ops) ----
+from .learning.forward_sigma import nerf_opacity, compute_opacity_simple
 
-# ------------------------------------------------------------------ #
-# Back‑compat shim: keep old  `nerflab.vis` import path working
-# ------------------------------------------------------------------ #
-import sys as _sys, importlib as _imp
-_vis_mod = _imp.import_module("nerflab.viz")
-_sys.modules["nerflab.vis"] = _vis_mod
-_sys.modules["nerflab.vis.plotting"] = _vis_mod  # earlier hard‑coded path
+# ---- Config ----
+from .config.config import CFG, Cfg, IntrinsicsCfg, RaySampleCfg
 
-# ------------------------------------------------------------------ #
-# Public API symbol list
-# ------------------------------------------------------------------ #
 __all__ = [
-    # utils
-    "homogenize", "dehomogenize", "invert_T", "distance", "look_at",
-    # core classes / functions
-    "Intrinsics", "Camera",
-    "Box", "Sphere", "World",
-    "stratified_samples_batch", "cartesian_to_spherical",
-    "nerf_opacity", "nerf_opacity_single", "sigma_from_world",
-    # visualisation
-    "plot_world", "viz_sigma_scatter", "viz_sigma_heatmap",
-    # configs
-    "CFG", "VizCFG", "IntrinsicsCfg", "RaySampleCfg",
-    # presets
-    "make_pose_cases", "pose_H",
+    # version
+    "__version__",
+    # camera
+    "Camera", "Intrinsics", "fx_from_fov", "fy_from_fov", "camera",
+    # world
+    "Box", "Sphere", "save_world", "load_world"
+    # learning
+    "nerf_opacity",
+    # config
+    "CFG", "Cfg", "IntrinsicsCfg", "RaySampleCfg",
 ]

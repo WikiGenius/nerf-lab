@@ -158,10 +158,102 @@ def look_at(
     T[:3, 3]  = eye_t
     return T
 
+def validate_se3(
+    H: torch.Tensor,
+    *,
+    name: str = "H",
+    atol_last_row: float = 1e-6,
+    tol_ortho: float = 1e-3,
+    tol_det: float = 1e-3,
+    repair: bool = False,   # if True, project R to nearest SO(3) and fix last row
+) -> torch.Tensor:
+    """
+    Ensure H is a (B?,4,4) homogeneous transform with:
+      - last row == [0,0,0,1] (within atol_last_row)
+      - R^T R ≈ I (within tol_ortho)
+      - det(R) ≈ +1 (within tol_det)
+      - finite entries
+
+    If repair=True, projects R to nearest SO(3) by SVD and sets last row exactly.
+    """
+    if H.shape[-2:] != (4, 4):
+        raise ValueError(f"{name} must have shape (...,4,4), got {tuple(H.shape)}")
+
+    batched = H.ndim == 3
+    if not batched:
+        H = H.unsqueeze(0)
+
+    B = H.shape[0]
+    device, dtype = H.device, H.dtype
+
+    R = H[..., :3, :3]
+    t = H[..., :3, 3]
+    last = H[..., 3, :]
+
+    target_last = torch.tensor([0., 0., 0., 1.], device=device, dtype=dtype).expand(B, 4)
+    last_err = (last - target_last).abs().amax(dim=-1)
+    row_ok = last_err <= atol_last_row
+
+    I3 = torch.eye(3, device=device, dtype=dtype).expand(B, 3, 3)
+    RtR = R.transpose(-1, -2) @ R
+    ortho_err = torch.linalg.matrix_norm(RtR - I3, ord="fro", dim=(-2, -1))
+    ortho_ok = ortho_err <= tol_ortho
+
+    detR = torch.linalg.det(R)
+    det_err = (detR - 1.0).abs()
+    det_ok = det_err <= tol_det
+
+    finite_ok = torch.isfinite(H.reshape(B, -1)).all(dim=-1)
+
+    ok = row_ok & ortho_ok & det_ok & finite_ok
+
+    if repair:
+        # Project ALL to nearest SO(3) and fix last row; simpler & safe
+        U, _, Vh = torch.linalg.svd(R)
+        Rproj = U @ Vh
+        # enforce det +1
+        detRproj = torch.linalg.det(Rproj)
+        flip = (detRproj < 0).to(dtype=dtype)
+        # flip last column of U when needed
+        U_fix = U.clone()
+        U_fix[..., :, 2] = U_fix[..., :, 2] * (1.0 - 2.0 * flip)[..., None]
+        Rproj = U_fix @ Vh
+
+        Hfixed = H.clone()
+        Hfixed[..., :3, :3] = Rproj
+        Hfixed[..., 3, :] = target_last
+
+        # Re-evaluate after repair
+        R = Hfixed[..., :3, :3]
+        RtR = R.transpose(-1, -2) @ R
+        ortho_err = torch.linalg.matrix_norm(RtR - I3, ord="fro", dim=(-2, -1))
+        det_err = (torch.linalg.det(R) - 1.0).abs()
+        last_err = (Hfixed[..., 3, :] - target_last).abs().amax(dim=-1)
+        ok = (ortho_err <= tol_ortho) & (det_err <= tol_det) & (last_err <= atol_last_row) \
+             & torch.isfinite(Hfixed.reshape(B, -1)).all(dim=-1)
+
+        H = Hfixed
+
+    if not ok.all():
+        bad_idx = (~ok).nonzero(as_tuple=False).squeeze(-1).tolist()
+        details = {
+            "row_err": last_err.detach().cpu().tolist(),
+            "ortho_err": ortho_err.detach().cpu().tolist(),
+            "det_err": det_err.detach().cpu().tolist(),
+        }
+        raise ValueError(
+            f"{name} contains {len(bad_idx)} invalid SE(3) matrix/matrices at indices {bad_idx}. "
+            f"Violations: non-orthonormal R / det!=+1 / bad last row / non-finite. "
+            f"Details (per batch): {details}"
+        )
+
+    return H[0] if not batched else H
+
 __all__ = [
     "homogenize",
     "dehomogenize",
     "invert_T",
     "distance",
-    "look_at"
+    "look_at",
+    "validate_se3"
 ]
