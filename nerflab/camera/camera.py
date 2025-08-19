@@ -15,6 +15,7 @@ from ..config.viz_config import viz_cfg
 from .sampling import stratified_samples_batch
 from ..viz.axis import style_3d_axis, axis_triad
 from ..viz.pose import draw_pose_axes
+import warnings
 
 class Camera:
     """
@@ -341,7 +342,7 @@ class Camera:
             cam_pos = T[:3, 3].detach().cpu().numpy()
             ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
             if draw_axes:
-                self._draw_pose_axes(ax, T, scale=self.t_far * 0.2)
+                draw_pose_axes(ax, T, scale=self.t_far * 0.2)
 
         if draw_world_axes:
             axis_triad(ax, length=viz_cfg.axis_triad_len)
@@ -404,7 +405,7 @@ class Camera:
                 T = self.H_wc[cam_index]
                 cam_pos = T[:3, 3].detach().cpu().numpy()
                 ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
-                self._draw_pose_axes(ax, T, scale=self.t_far * 0.2)
+                draw_pose_axes(ax, T, scale=self.t_far * 0.2)
         else:
             P = pts.reshape(-1, 3).detach().cpu().numpy()
             ax.scatter(*P.T, s=samples_size, c=col, depthshade=False)
@@ -418,7 +419,7 @@ class Camera:
             if frame == "world":
                 cam_pos = self.H_wc[:3, 3].detach().cpu().numpy()
                 ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
-                self._draw_pose_axes(ax, self.H_wc, scale=self.t_far * 0.2)
+                draw_pose_axes(ax, self.H_wc, scale=self.t_far * 0.2)
 
         if frame == "world":
             axis_triad(ax, length=viz_cfg.axis_triad_len)
@@ -487,7 +488,15 @@ class Camera:
 
     @staticmethod
     def _draw_pose_axes(ax, T: torch.Tensor, scale: float = 0.1):
-        """Draw RGB axis triad at pose T."""
+        """Draw RGB axis triad at pose T.
+        [DEPRECATED] Use nerflab.viz.pose.draw_pose_axes instead.
+        """
+        warnings.warn(
+            "Camera._draw_pose_axes is deprecated; "
+            "use nerflab.viz.pose.draw_pose_axes(ax, T, ...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         Tnp = T.detach().cpu().numpy()
         o = Tnp[:3, 3]
         R = Tnp[:3, :3]
