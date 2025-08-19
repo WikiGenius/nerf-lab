@@ -1,6 +1,6 @@
 # nerflab/camera.py
+# nerflab/camera.py (only the changed/import bits shown)
 from __future__ import annotations
-
 from typing import Optional, Tuple, Literal, Union
 
 import torch
@@ -10,10 +10,11 @@ from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 from .intrinsics import Intrinsics
 from .transforms import invert_T
-from ..viz.axis import style_3d_axis, axis_triad
+from ..config.config import CFG
 from ..config.viz_config import viz_cfg
 from .sampling import stratified_samples_batch
-from ..config.config import CFG  
+from ..viz.axis import style_3d_axis, axis_triad
+from ..viz.pose import draw_pose_axes
 
 class Camera:
     """
@@ -80,6 +81,8 @@ class Camera:
         # store intrinsics
         self.intr = intr
 
+        self.deterministic = bool(CFG.rays.deterministic)
+        
         # poses
         self.H_wc = torch.as_tensor(H_wc, device=device, dtype=dtype)
         if self.H_wc.shape[-2:] != (4, 4):
@@ -257,7 +260,7 @@ class Camera:
         if O.shape != D.shape or O.shape[-1] != 3:
             raise ValueError(f"O and D must share shape (..., 3); got O{O.shape}, D{D.shape}")
 
-        det = bool(deterministic) if deterministic is not None else False
+        det = bool(deterministic) if deterministic is not None else self.deterministic
 
         # Pull config from *this* camera (set in __init__)
         t_near = self.t_near
