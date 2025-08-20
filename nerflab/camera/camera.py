@@ -17,6 +17,7 @@ from ..viz.axis import style_3d_axis, axis_triad
 from ..viz.pose import draw_pose_axes
 import warnings
 
+
 class Camera:
     """
     Minimal pinhole camera with optional batching.
@@ -55,7 +56,6 @@ class Camera:
         ValueError: If input shapes are invalid or parameters are out of range.
     """
 
-
     def __init__(
         self,
         H_wc: Union[torch.Tensor, np.ndarray],
@@ -70,8 +70,10 @@ class Camera:
         if intr is None:
             ic = CFG.intrinsics
             intr = Intrinsics(
-                fx=float(ic.fx), fy=float(ic.fy),
-                width=int(ic.width), height=int(ic.height)
+                fx=float(ic.fx),
+                fy=float(ic.fy),
+                width=int(ic.width),
+                height=int(ic.height),
             )
         if t_bounds is None:
             rc = CFG.rays
@@ -83,7 +85,7 @@ class Camera:
         self.intr = intr
 
         self.deterministic = bool(CFG.rays.deterministic)
-        
+
         # poses
         # self.H_wc = torch.as_tensor(H_wc, device=device, dtype=dtype)
         # if self.H_wc.shape[-2:] != (4, 4):
@@ -91,7 +93,9 @@ class Camera:
         # self.H_cw = invert_T(self.H_wc)
         # poses
         H_wc_t = torch.as_tensor(H_wc, device=device, dtype=dtype)
-        self.H_wc = validate_se3(H_wc_t, name="H_wc", repair=False)  # set True if you prefer auto-fix
+        self.H_wc = validate_se3(
+            H_wc_t, name="H_wc", repair=False
+        )  # set True if you prefer auto-fix
         self.H_cw = invert_T(self.H_wc)
 
         # scalars
@@ -141,7 +145,7 @@ class Camera:
 
         # default to pose's device/dtype
         device = device or self.H_wc.device
-        dtype  = dtype  or self.H_wc.dtype
+        dtype = dtype or self.H_wc.dtype
 
         # --- cache lookup ---
         key = self._rays_cache_key(
@@ -154,7 +158,9 @@ class Camera:
 
         # (R,), (R,) pixel coordinates & camera-frame directions (R,3)
         u, v = self._pixel_grid(step=step, device=device, dtype=dtype)
-        dirs_c = self._dirs_cam(u, v, normalize=normalize).to(device=device, dtype=dtype)
+        dirs_c = self._dirs_cam(u, v, normalize=normalize).to(
+            device=device, dtype=dtype
+        )
 
         if frame == "camera":
             if self._is_batched:
@@ -169,11 +175,11 @@ class Camera:
 
         # world-frame
         R_wc = self.H_wc[..., :3, :3]  # (3,3) or (B,3,3)
-        t_wc = self.H_wc[..., :3, 3]   # (3,)   or (B,3)
+        t_wc = self.H_wc[..., :3, 3]  # (3,)   or (B,3)
 
         if self._is_batched:
             # dirs_c: (R,3) → (B,R,3)
-            D = torch.einsum('bij,rj->bri', R_wc, dirs_c)  # (B,R,3)
+            D = torch.einsum("bij,rj->bri", R_wc, dirs_c)  # (B,R,3)
             if normalize:
                 D = D / D.norm(dim=-1, keepdim=True).clamp_min(1e-12)
             O = t_wc[:, None, :].expand(-1, D.shape[1], -1)  # (B, R, 3)
@@ -181,7 +187,7 @@ class Camera:
             D = (R_wc @ dirs_c.T).T  # (R,3)
             if normalize:
                 D = D / D.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-            O = t_wc.expand_as(D)    # (R,3)
+            O = t_wc.expand_as(D)  # (R,3)
 
         O = O.to(device=device, dtype=dtype)
         D = D.to(device=device, dtype=dtype)
@@ -190,7 +196,6 @@ class Camera:
         self._rays_cache[key] = (O, D)
         return O, D
 
-
     # ==========================================================================
     # Rays — sampled per pose (random indices or explicit indices)
     # ==========================================================================
@@ -198,12 +203,12 @@ class Camera:
     def get_rays_sampled(
         self,
         *,
-        rays_per_pose: Optional[int] = None,         # None → all rays
+        rays_per_pose: Optional[int] = None,  # None → all rays
         frame: Literal["camera", "world"] = "world",
         step: int = 1,
         normalize: bool = True,
         rng: Optional[torch.Generator] = None,
-        indices: Optional[torch.Tensor] = None,      # (K,) or (B,K)
+        indices: Optional[torch.Tensor] = None,  # (K,) or (B,K)
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -215,8 +220,9 @@ class Camera:
         2) Else if `rays_per_pose` is None, return all rays.
         3) Else sample exactly `rays_per_pose` per pose.
         """
-        O, D = self.get_rays(frame=frame, step=step, normalize=normalize,
-                             device=device, dtype=dtype)
+        O, D = self.get_rays(
+            frame=frame, step=step, normalize=normalize, device=device, dtype=dtype
+        )
 
         # ── explicit indices ──────────────────────────────────────────────────
         if indices is not None:
@@ -246,7 +252,9 @@ class Camera:
                 return O, D
             # Random per-pose without replacement (uniform)
             probs = torch.full((B, R), 1.0 / R, device=O.device, dtype=torch.float32)
-            idx = torch.multinomial(probs, num_samples=K, replacement=False).to(torch.long)  # (B, K)
+            idx = torch.multinomial(probs, num_samples=K, replacement=False).to(
+                torch.long
+            )  # (B, K)
             idx3 = idx.unsqueeze(-1).expand(-1, -1, 3)
             return torch.gather(O, 1, idx3), torch.gather(D, 1, idx3)
 
@@ -280,14 +288,16 @@ class Camera:
         • Batched:    O,D ∈ (B,R, 3)  → (B,R,N), (B,R,N), (B,R,N,3)
         """
         if O.shape != D.shape or O.shape[-1] != 3:
-            raise ValueError(f"O and D must share shape (..., 3); got O{O.shape}, D{D.shape}")
+            raise ValueError(
+                f"O and D must share shape (..., 3); got O{O.shape}, D{D.shape}"
+            )
 
         det = bool(deterministic) if deterministic is not None else self.deterministic
 
         # Pull config from *this* camera (set in __init__)
         t_near = self.t_near
-        t_far  = self.t_far
-        N      = self.n_points_per_ray
+        t_far = self.t_far
+        N = self.n_points_per_ray
 
         if O.ndim == 2:  # (R,3)
             return stratified_samples_batch(
@@ -304,7 +314,6 @@ class Camera:
 
         raise ValueError("O and D must be (R,3) or (B,R,3)")
 
-
     # ==========================================================================
     # Visualization — rays
     # ==========================================================================
@@ -320,10 +329,9 @@ class Camera:
         points: Optional[Union[torch.Tensor, np.ndarray]] = None,
         draw_axes: bool = True,
         draw_world_axes: bool = True,
-        cam_index: int = 0,                               # kept for backward-compat
+        cam_index: int = 0,  # kept for backward-compat
         cam_indices: Optional[Union[int, Iterable[int], Literal["all"]]] = None,
     ) -> None:
-
         """
         Visualize either:
           • Rays as lines or quivers, or
@@ -350,7 +358,9 @@ class Camera:
             O, D = self.get_rays(frame=frame, step=step or 1, normalize=True)
 
             # choose which cams to draw
-            sel = self._select_cam_indices(cam_indices if cam_indices is not None else cam_index)
+            sel = self._select_cam_indices(
+                cam_indices if cam_indices is not None else cam_index
+            )
 
             # iterate selected cameras (handles un/batched uniformly)
             if self._is_batched:
@@ -360,7 +370,14 @@ class Camera:
                     O_np, D_np = Oi.detach().cpu().numpy(), Di.detach().cpu().numpy()
                     col = color if color is not None else f"C{(k % 10)}"
                     if mode == "quiver":
-                        ax.quiver(*O_np.T, *D_np.T, length=ray_len, normalize=True, color=col, linewidth=0.6)
+                        ax.quiver(
+                            *O_np.T,
+                            *D_np.T,
+                            length=ray_len,
+                            normalize=True,
+                            color=col,
+                            linewidth=0.6,
+                        )
                     elif mode == "lines":
                         segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
                         ax.add_collection3d(Line3DCollection(segs, colors=col, lw=0.7))
@@ -370,7 +387,13 @@ class Camera:
                     if frame == "world":
                         T = self.H_wc[ci]
                         cam_pos = T[:3, 3].detach().cpu().numpy()
-                        ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c=col, marker="o", label=f"Cam {ci}")
+                        ax.scatter(
+                            *cam_pos,
+                            s=viz_cfg.camera_marker_size,
+                            c=col,
+                            marker="o",
+                            label=f"Cam {ci}",
+                        )
                         if draw_axes:
                             draw_pose_axes(ax, T, scale=self.t_far * 0.2)
             else:
@@ -378,26 +401,45 @@ class Camera:
                 ray_len = float(self.t_far)
                 O_np, D_np = O.detach().cpu().numpy(), D.detach().cpu().numpy()
                 if mode == "quiver":
-                    ax.quiver(*O_np.T, *D_np.T, length=ray_len, normalize=True, color=color or "C0", linewidth=0.6)
+                    ax.quiver(
+                        *O_np.T,
+                        *D_np.T,
+                        length=ray_len,
+                        normalize=True,
+                        color=color or "C0",
+                        linewidth=0.6,
+                    )
                 elif mode == "lines":
                     segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
-                    ax.add_collection3d(Line3DCollection(segs, colors=color or "C0", lw=0.7))
+                    ax.add_collection3d(
+                        Line3DCollection(segs, colors=color or "C0", lw=0.7)
+                    )
                 else:
                     raise ValueError("mode must be 'lines', 'quiver', or 'points'")
 
                 if frame == "world":
                     cam_pos = self.H_wc[:3, 3].detach().cpu().numpy()
-                    ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
+                    ax.scatter(
+                        *cam_pos,
+                        s=viz_cfg.camera_marker_size,
+                        c="red",
+                        marker="o",
+                        label="Cam",
+                    )
 
         if frame == "world":
             axis_triad(ax, length=viz_cfg.axis_triad_len)
 
-        style_3d_axis(ax, invert=viz_cfg.axis_invert, elev=viz_cfg.axis_elev, azim=viz_cfg.axis_azim)
+        style_3d_axis(
+            ax,
+            invert=viz_cfg.axis_invert,
+            elev=viz_cfg.axis_elev,
+            azim=viz_cfg.axis_azim,
+        )
         if ax.get_legend_handles_labels()[1]:
             ax.legend(loc="upper right")
         plt.tight_layout()
         plt.show()
-
 
     # ==========================================================================
     # Visualization — sampled points (uses your sampler by default)
@@ -412,12 +454,11 @@ class Camera:
         show_rays: bool = True,
         samples_color: Optional[str] = None,
         samples_size: float = 6.0,
-        cam_index: int = 0,   # backward-compat
+        cam_index: int = 0,  # backward-compat
         cam_indices: Optional[Union[int, Iterable[int], Literal["all"]]] = None,
         rng: Optional[torch.Generator] = None,
         deterministic: Optional[bool] = None,
     ) -> None:
-
         """
         Convenience visualizer:
           1) pick rays (all or subset),
@@ -425,22 +466,34 @@ class Camera:
           3) scatter sampled points (and optionally draw the rays).
         """
         # 1) pick rays for the *full* batch or single
-        O, D = self.get_rays_sampled(rays_per_pose=rays_per_pose, step=step, frame=frame)
+        O, D = self.get_rays_sampled(
+            rays_per_pose=rays_per_pose, step=step, frame=frame
+        )
 
         fig = plt.figure(figsize=viz_cfg.figsize, dpi=viz_cfg.dpi)
         ax = fig.add_subplot(111, projection="3d")
 
         if self._is_batched:
-            sel = self._select_cam_indices(cam_indices if cam_indices is not None else cam_index)
+            sel = self._select_cam_indices(
+                cam_indices if cam_indices is not None else cam_index
+            )
 
             # sample along ALL selected rays in one call by masking/stacking
             # (simpler path: sample full then plot subset)
-            t_vals, deltas, pts = self.sample_along_rays(O, D, rng=rng, deterministic=deterministic)
+            t_vals, deltas, pts = self.sample_along_rays(
+                O, D, rng=rng, deterministic=deterministic
+            )
 
             for k, ci in enumerate(sel):
                 P = pts[ci].reshape(-1, 3).detach().cpu().numpy()
                 col = samples_color or f"C{(k+1) % 10}"
-                ax.scatter(*P.T, s=samples_size, c=col, depthshade=False, label=f"samples cam {ci}")
+                ax.scatter(
+                    *P.T,
+                    s=samples_size,
+                    c=col,
+                    depthshade=False,
+                    label=f"samples cam {ci}",
+                )
 
                 if show_rays:
                     Oi, Di = O[ci], D[ci]
@@ -452,10 +505,18 @@ class Camera:
                 if frame == "world":
                     T = self.H_wc[ci]
                     cam_pos = T[:3, 3].detach().cpu().numpy()
-                    ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c=f"C{(k % 10)}", marker="o", label=f"Cam {ci}")
+                    ax.scatter(
+                        *cam_pos,
+                        s=viz_cfg.camera_marker_size,
+                        c=f"C{(k % 10)}",
+                        marker="o",
+                        label=f"Cam {ci}",
+                    )
                     draw_pose_axes(ax, T, scale=self.t_far * 0.2)
         else:
-            t_vals, deltas, pts = self.sample_along_rays(O, D, rng=rng, deterministic=deterministic)
+            t_vals, deltas, pts = self.sample_along_rays(
+                O, D, rng=rng, deterministic=deterministic
+            )
             P = pts.reshape(-1, 3).detach().cpu().numpy()
             ax.scatter(*P.T, s=samples_size, c=samples_color or "C1", depthshade=False)
 
@@ -467,18 +528,28 @@ class Camera:
 
             if frame == "world":
                 cam_pos = self.H_wc[:3, 3].detach().cpu().numpy()
-                ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
+                ax.scatter(
+                    *cam_pos,
+                    s=viz_cfg.camera_marker_size,
+                    c="red",
+                    marker="o",
+                    label="Cam",
+                )
                 draw_pose_axes(ax, self.H_wc, scale=self.t_far * 0.2)
 
         if frame == "world":
             axis_triad(ax, length=viz_cfg.axis_triad_len)
 
-        style_3d_axis(ax, invert=viz_cfg.axis_invert, elev=viz_cfg.axis_elev, azim=viz_cfg.axis_azim)
+        style_3d_axis(
+            ax,
+            invert=viz_cfg.axis_invert,
+            elev=viz_cfg.axis_elev,
+            azim=viz_cfg.axis_azim,
+        )
         if ax.get_legend_handles_labels()[1]:
             ax.legend(loc="upper right")
         plt.tight_layout()
         plt.show()
-
 
     # ==========================================================================
     # Diagnostics
@@ -493,22 +564,62 @@ class Camera:
         if self._is_batched:
             print("Batch size:", self.B)
 
+    def clear_cache(self) -> None:
+        """Clear all per-instance caches (rays + pixel grid)."""
+        self._rays_cache.clear()
+        self._grid_cache_key = None
+        self._u_cache = None
+        self._v_cache = None
+
+    def set_poses(
+        self, H_wc: Union[torch.Tensor, np.ndarray], *, repair: bool = False
+    ) -> None:
+        """
+        Replace camera pose(s) and invalidate caches.
+        Accepts (4,4) or (B,4,4).
+        """
+        H_wc_t = torch.as_tensor(H_wc, device=self.H_wc.device, dtype=self.H_wc.dtype)
+        self.H_wc = validate_se3(H_wc_t, name="H_wc", repair=repair)
+        self.H_cw = invert_T(self.H_wc)
+        self._pose_version += 1
+        self._rays_cache.clear()  # invalidate rays (pixel grid cache still valid for same W,H,step)
+
+    def to(
+        self, device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = None
+    ):
+        """
+        Move internal tensors to device/dtype. Invalidates ray cache because device/dtype is part of the key.
+        """
+        device = device or self.H_wc.device
+        dtype = dtype or self.H_wc.dtype
+        self.H_wc = self.H_wc.to(device=device, dtype=dtype)
+        self.H_cw = self.H_cw.to(device=device, dtype=dtype)
+        # pixel-grid caches depend on device/dtype too
+        self._rays_cache.clear()
+        self._grid_cache_key = None
+        self._u_cache = None
+        self._v_cache = None
+        return self
+
     # ==========================================================================
     # Internals
     # ==========================================================================
-    def _dirs_cam(self, u: torch.Tensor, v: torch.Tensor, normalize: bool) -> torch.Tensor:
+    def _dirs_cam(
+        self, u: torch.Tensor, v: torch.Tensor, normalize: bool
+    ) -> torch.Tensor:
         """
         Camera-frame directions for pixel coords (u,v).
         Convention: +x right, +y up, -z forward.
         """
         # keep scalar intrinsics as floats; cast tensor pieces explicitly
-        fx, fy, cx, cy = float(self.intr.fx), float(self.intr.fy), float(self.intr.cx), float(self.intr.cy)
+        fx, fy, cx, cy = (
+            float(self.intr.fx),
+            float(self.intr.fy),
+            float(self.intr.cx),
+            float(self.intr.cy),
+        )
         one = torch.ones_like(u)
-        dirs = torch.stack([
-            (u - cx) / fx,
-            -(v - cy) / fy,
-            -one
-        ], dim=-1)  # (R,3)
+        dirs = torch.stack([(u - cx) / fx, -(v - cy) / fy, -one], dim=-1)  # (R,3)
 
         if normalize:
             dirs = dirs / dirs.norm(dim=-1, keepdim=True).clamp_min(1e-12)
@@ -519,12 +630,16 @@ class Camera:
         step: int = 1,
         *,
         device: Optional[torch.device] = None,
-        dtype: torch.dtype = torch.float32
+        dtype: torch.dtype = torch.float32,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Flattened pixel grid (u,v) with stride = step."""
         H, W = int(self.intr.height), int(self.intr.width)
         key = (H, W, int(step), str(device), str(dtype))
-        if key == self._grid_cache_key and self._u_cache is not None and self._v_cache is not None:
+        if (
+            key == self._grid_cache_key
+            and self._u_cache is not None
+            and self._v_cache is not None
+        ):
             return self._u_cache, self._v_cache
 
         v = torch.arange(0, H, step, device=device, dtype=dtype)
@@ -596,8 +711,8 @@ class Camera:
         # we use id(self.H_wc) + a monotonic _pose_version so that even in-place edits
         # followed by set_poses() will invalidate; users should call set_poses() when changing poses
         return (
-            id(self.H_wc),             # tensor identity
-            self._pose_version,        # bump on set_poses()
+            id(self.H_wc),  # tensor identity
+            self._pose_version,  # bump on set_poses()
             frame,
             int(step),
             bool(normalize),
@@ -605,37 +720,5 @@ class Camera:
             str(dtype),
         )
 
-    def clear_cache(self) -> None:
-        """Clear all per-instance caches (rays + pixel grid)."""
-        self._rays_cache.clear()
-        self._grid_cache_key = None
-        self._u_cache = None
-        self._v_cache = None
 
-    def set_poses(self, H_wc: Union[torch.Tensor, np.ndarray], *, repair: bool = False) -> None:
-        """
-        Replace camera pose(s) and invalidate caches.
-        Accepts (4,4) or (B,4,4).
-        """
-        H_wc_t = torch.as_tensor(H_wc, device=self.H_wc.device, dtype=self.H_wc.dtype)
-        self.H_wc = validate_se3(H_wc_t, name="H_wc", repair=repair)
-        self.H_cw = invert_T(self.H_wc)
-        self._pose_version += 1
-        self._rays_cache.clear()  # invalidate rays (pixel grid cache still valid for same W,H,step)
-
-    def to(self, device: Optional[torch.device] = None, dtype: Optional[torch.dtype] = None):
-        """
-        Move internal tensors to device/dtype. Invalidates ray cache because device/dtype is part of the key.
-        """
-        device = device or self.H_wc.device
-        dtype  = dtype  or self.H_wc.dtype
-        self.H_wc = self.H_wc.to(device=device, dtype=dtype)
-        self.H_cw = self.H_cw.to(device=device, dtype=dtype)
-        # pixel-grid caches depend on device/dtype too
-        self._rays_cache.clear()
-        self._grid_cache_key = None
-        self._u_cache = None
-        self._v_cache = None
-        return self
-    
 __all__ = ["Camera"]
