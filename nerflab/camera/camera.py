@@ -1,7 +1,7 @@
 # nerflab/camera.py
 # nerflab/camera.py (only the changed/import bits shown)
 from __future__ import annotations
-from typing import Optional, Tuple, Literal, Union
+from typing import Optional, Tuple, Literal, Union, Iterable
 
 import torch
 import numpy as np
@@ -202,7 +202,7 @@ class Camera:
         frame: Literal["camera", "world"] = "world",
         step: int = 1,
         normalize: bool = True,
-        generator: Optional[torch.Generator] = None,
+        rng: Optional[torch.Generator] = None,
         indices: Optional[torch.Tensor] = None,      # (K,) or (B,K)
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
@@ -257,7 +257,7 @@ class Camera:
             raise ValueError(f"rays_per_pose must be in [1, {R}] (got {K})")
         if K == R:
             return O, D
-        idx = torch.randperm(R, generator=generator, device=O.device)[:K]
+        idx = torch.randperm(R, generator=rng, device=O.device)[:K]
         return O.index_select(0, idx), D.index_select(0, idx)
 
     # ==========================================================================
@@ -308,6 +308,7 @@ class Camera:
     # ==========================================================================
     # Visualization — rays
     # ==========================================================================
+    @torch.no_grad()
     def plot_rays(
         self,
         *,
@@ -316,11 +317,13 @@ class Camera:
         mode: Literal["lines", "quiver", "points"] | None = None,
         color: Optional[str] = None,
         point_size: float = 6.0,
-        points: Optional[Union[torch.Tensor, np.ndarray]] = None,  # for mode="points"
+        points: Optional[Union[torch.Tensor, np.ndarray]] = None,
         draw_axes: bool = True,
         draw_world_axes: bool = True,
-        cam_index: int = 0,
+        cam_index: int = 0,                               # kept for backward-compat
+        cam_indices: Optional[Union[int, Iterable[int], Literal["all"]]] = None,
     ) -> None:
+
         """
         Visualize either:
           • Rays as lines or quivers, or
@@ -342,30 +345,51 @@ class Camera:
             if P.shape[-1] != 3:
                 raise ValueError("`points` last dim must be 3")
             P_np = P[::step].detach().cpu().numpy()
-            ax.scatter(*P_np.T, s=point_size, c=color, depthshade=False)
+            ax.scatter(*P_np.T, s=point_size, c=color or "C1", depthshade=False)
         else:
-            O, D = self.get_rays(frame=frame, step=step, normalize=True)
-            if self._is_batched:
-                O, D = O[cam_index], D[cam_index]
-            ray_len = float(self.t_far)
-            O_np, D_np = O.detach().cpu().numpy(), D.detach().cpu().numpy()
+            O, D = self.get_rays(frame=frame, step=step or 1, normalize=True)
 
-            if mode == "quiver":
-                ax.quiver(*O_np.T, *D_np.T, length=ray_len, normalize=True, color=color, linewidth=0.6)
-            elif mode == "lines":
-                segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
-                ax.add_collection3d(Line3DCollection(segs, colors=color, lw=0.7))
+            # choose which cams to draw
+            sel = self._select_cam_indices(cam_indices if cam_indices is not None else cam_index)
+
+            # iterate selected cameras (handles un/batched uniformly)
+            if self._is_batched:
+                for k, ci in enumerate(sel):
+                    Oi, Di = O[ci], D[ci]
+                    ray_len = float(self.t_far)
+                    O_np, D_np = Oi.detach().cpu().numpy(), Di.detach().cpu().numpy()
+                    col = color if color is not None else f"C{(k % 10)}"
+                    if mode == "quiver":
+                        ax.quiver(*O_np.T, *D_np.T, length=ray_len, normalize=True, color=col, linewidth=0.6)
+                    elif mode == "lines":
+                        segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
+                        ax.add_collection3d(Line3DCollection(segs, colors=col, lw=0.7))
+                    else:
+                        raise ValueError("mode must be 'lines', 'quiver', or 'points'")
+
+                    if frame == "world":
+                        T = self.H_wc[ci]
+                        cam_pos = T[:3, 3].detach().cpu().numpy()
+                        ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c=col, marker="o", label=f"Cam {ci}")
+                        if draw_axes:
+                            draw_pose_axes(ax, T, scale=self.t_far * 0.2)
             else:
-                raise ValueError("mode must be 'lines', 'quiver', or 'points'")
+                # single pose path unchanged
+                ray_len = float(self.t_far)
+                O_np, D_np = O.detach().cpu().numpy(), D.detach().cpu().numpy()
+                if mode == "quiver":
+                    ax.quiver(*O_np.T, *D_np.T, length=ray_len, normalize=True, color=color or "C0", linewidth=0.6)
+                elif mode == "lines":
+                    segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
+                    ax.add_collection3d(Line3DCollection(segs, colors=color or "C0", lw=0.7))
+                else:
+                    raise ValueError("mode must be 'lines', 'quiver', or 'points'")
+
+                if frame == "world":
+                    cam_pos = self.H_wc[:3, 3].detach().cpu().numpy()
+                    ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
 
         if frame == "world":
-            T = self.H_wc if not self._is_batched else self.H_wc[cam_index]
-            cam_pos = T[:3, 3].detach().cpu().numpy()
-            ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
-            if draw_axes:
-                draw_pose_axes(ax, T, scale=self.t_far * 0.2)
-
-        if draw_world_axes:
             axis_triad(ax, length=viz_cfg.axis_triad_len)
 
         style_3d_axis(ax, invert=viz_cfg.axis_invert, elev=viz_cfg.axis_elev, azim=viz_cfg.axis_azim)
@@ -374,6 +398,7 @@ class Camera:
         plt.tight_layout()
         plt.show()
 
+
     # ==========================================================================
     # Visualization — sampled points (uses your sampler by default)
     # ==========================================================================
@@ -381,55 +406,58 @@ class Camera:
     def plot_samples(
         self,
         *,
-        rays_per_pose: Optional[int] = None,  # None → all rays
-        step: int = 1,                        # pre-grid stride for selecting rays
+        rays_per_pose: Optional[int] = None,
+        step: int = 1,
         frame: Literal["world", "camera"] = "world",
         show_rays: bool = True,
         samples_color: Optional[str] = None,
         samples_size: float = 6.0,
-        cam_index: int = 0,
+        cam_index: int = 0,   # backward-compat
+        cam_indices: Optional[Union[int, Iterable[int], Literal["all"]]] = None,
         rng: Optional[torch.Generator] = None,
-        deterministic: Optional[bool] = None,  # forwarded to your sampler
+        deterministic: Optional[bool] = None,
     ) -> None:
+
         """
         Convenience visualizer:
           1) pick rays (all or subset),
           2) sample along them using your stratified sampler,
           3) scatter sampled points (and optionally draw the rays).
         """
-        # 1) pick rays
-        O, D = self.get_rays_sampled(
-            rays_per_pose=rays_per_pose, step=step, frame=frame
-        )  # (R,3) or (B,K,3)
+        # 1) pick rays for the *full* batch or single
+        O, D = self.get_rays_sampled(rays_per_pose=rays_per_pose, step=step, frame=frame)
 
-        # 2) sample along rays via your sampler
-        t_vals, deltas, pts = self.sample_along_rays(O, D, rng=rng, deterministic=deterministic)
-        # shapes: (R,N),(R,N),(R,N,3) or (B,R,N),(B,R,N),(B,R,N,3)
-
-        # 3) plot
         fig = plt.figure(figsize=viz_cfg.figsize, dpi=viz_cfg.dpi)
         ax = fig.add_subplot(111, projection="3d")
-        col = samples_color or "C1"
 
         if self._is_batched:
-            P = pts[cam_index].reshape(-1, 3).detach().cpu().numpy()
-            ax.scatter(*P.T, s=samples_size, c=col, depthshade=False)
+            sel = self._select_cam_indices(cam_indices if cam_indices is not None else cam_index)
 
-            if show_rays:
-                Oi, Di = O[cam_index], D[cam_index]
-                ray_len = float(self.t_far)
-                O_np, D_np = Oi.detach().cpu().numpy(), Di.detach().cpu().numpy()
-                segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
-                ax.add_collection3d(Line3DCollection(segs, colors="C0", lw=0.6))
+            # sample along ALL selected rays in one call by masking/stacking
+            # (simpler path: sample full then plot subset)
+            t_vals, deltas, pts = self.sample_along_rays(O, D, rng=rng, deterministic=deterministic)
 
-            if frame == "world":
-                T = self.H_wc[cam_index]
-                cam_pos = T[:3, 3].detach().cpu().numpy()
-                ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c="red", marker="o", label="Cam")
-                draw_pose_axes(ax, T, scale=self.t_far * 0.2)
+            for k, ci in enumerate(sel):
+                P = pts[ci].reshape(-1, 3).detach().cpu().numpy()
+                col = samples_color or f"C{(k+1) % 10}"
+                ax.scatter(*P.T, s=samples_size, c=col, depthshade=False, label=f"samples cam {ci}")
+
+                if show_rays:
+                    Oi, Di = O[ci], D[ci]
+                    ray_len = float(self.t_far)
+                    O_np, D_np = Oi.detach().cpu().numpy(), Di.detach().cpu().numpy()
+                    segs = np.stack([O_np, O_np + ray_len * D_np], axis=1)
+                    ax.add_collection3d(Line3DCollection(segs, colors="C0", lw=0.6))
+
+                if frame == "world":
+                    T = self.H_wc[ci]
+                    cam_pos = T[:3, 3].detach().cpu().numpy()
+                    ax.scatter(*cam_pos, s=viz_cfg.camera_marker_size, c=f"C{(k % 10)}", marker="o", label=f"Cam {ci}")
+                    draw_pose_axes(ax, T, scale=self.t_far * 0.2)
         else:
+            t_vals, deltas, pts = self.sample_along_rays(O, D, rng=rng, deterministic=deterministic)
             P = pts.reshape(-1, 3).detach().cpu().numpy()
-            ax.scatter(*P.T, s=samples_size, c=col, depthshade=False)
+            ax.scatter(*P.T, s=samples_size, c=samples_color or "C1", depthshade=False)
 
             if show_rays:
                 ray_len = float(self.t_far)
@@ -450,6 +478,7 @@ class Camera:
             ax.legend(loc="upper right")
         plt.tight_layout()
         plt.show()
+
 
     # ==========================================================================
     # Diagnostics
@@ -506,6 +535,32 @@ class Camera:
         self._u_cache = uu.reshape(-1)
         self._v_cache = vv.reshape(-1)
         return self._u_cache, self._v_cache
+
+    def _select_cam_indices(
+        self,
+        cam_indices: Optional[Union[int, Iterable[int], Literal["all"]]],
+    ) -> list[int]:
+        """
+        Normalize camera selection to a list of indices.
+        - None  -> [0] (default first camera)
+        - int   -> [that index]
+        - list/iterable -> as list
+        - "all" -> range(self.B)
+        """
+        if not self._is_batched:
+            return [0]
+
+        if cam_indices is None:
+            return [0]
+        if cam_indices == "all":
+            return list(range(self.B))
+        if isinstance(cam_indices, int):
+            cam_indices = [cam_indices]
+        idxs = list(int(i) for i in cam_indices)
+        for i in idxs:
+            if not (0 <= i < self.B):
+                raise ValueError(f"cam index {i} out of range [0, {self.B-1}]")
+        return idxs
 
     @staticmethod
     def _draw_pose_axes(ax, T: torch.Tensor, scale: float = 0.1):
