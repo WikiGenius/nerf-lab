@@ -426,7 +426,8 @@ class Camera:
                         marker="o",
                         label="Cam",
                     )
-
+                    if draw_axes:
+                        draw_pose_axes(ax, self.H_wc, scale=self.t_far * 0.2)
         if frame == "world":
             axis_triad(ax, length=viz_cfg.axis_triad_len)
 
