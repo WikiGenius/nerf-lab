@@ -1,4 +1,4 @@
-# nerflab/utils.py
+# nerflab/transforms.py
 from __future__ import annotations
 from typing import Sequence, Union, Iterable, Optional
 import torch

@@ -241,7 +241,8 @@ class Camera:
 
         # ── decide K ──────────────────────────────────────────────────────────
         if rays_per_pose is None:
-            return O, D  # all rays
+            # return O, D  # all rays
+            rays_per_pose = int(CFG.rays.R)
 
         if self._is_batched:
             B, R, _ = O.shape
@@ -643,6 +644,7 @@ class Camera:
         ):
             return self._u_cache, self._v_cache
 
+        # OPTIMIZE: calc u, v can be calculated randomly based on rays_per_pose in addition to this for training
         v = torch.arange(0, H, step, device=device, dtype=dtype)
         u = torch.arange(0, W, step, device=device, dtype=dtype)
         vv, uu = torch.meshgrid(v, u, indexing="ij")

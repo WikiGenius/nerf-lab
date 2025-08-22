@@ -42,7 +42,7 @@ def _iter_cameras(cams: CameraLike) -> list[Camera]:
 def _clamp01(x: float) -> float:
     return 0.0 if x < 0.0 else 1.0 if x > 1.0 else x
 
-
+@torch.no_grad()
 def plot_world(
     world,
     *,
@@ -85,6 +85,7 @@ def plot_world(
     # ── optional override of near/far for visual length of rays ────────────
     t_near: Optional[float] = None,
     t_far: Optional[float] = None,
+    set_labels = True
 ) -> None:
     """
     Render a World + (batched) Cameras + rays/samples in WORLD frame.
@@ -250,7 +251,7 @@ def plot_world(
 
     # De-duplicate legend labels (one per camera color)
     handles, labels = ax.get_legend_handles_labels()
-    if labels:
+    if set_labels and labels:
         seen = set()
         uniq_h, uniq_l = [], []
         for h, l in zip(handles, labels):
