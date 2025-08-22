@@ -65,6 +65,7 @@ class Camera:
         *,
         device: Optional[torch.device] = None,
         dtype: torch.dtype = torch.float32,
+        repair_validate_se3=False
     ):
         # --- defaults from CFG if None ---
         if intr is None:
@@ -94,7 +95,7 @@ class Camera:
         # poses
         H_wc_t = torch.as_tensor(H_wc, device=device, dtype=dtype)
         self.H_wc = validate_se3(
-            H_wc_t, name="H_wc", repair=False
+            H_wc_t, name="H_wc", repair=repair_validate_se3
         )  # set True if you prefer auto-fix
         self.H_cw = invert_T(self.H_wc)
 
