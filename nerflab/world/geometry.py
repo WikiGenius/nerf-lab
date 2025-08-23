@@ -158,26 +158,60 @@ class World:
         self.shapes.append(shape)
         return self
 
-    def density(self, xyz: torch.Tensor) -> torch.Tensor:
+
+    def density(
+        self,
+        xyz: torch.Tensor,
+        *,
+        chunk_points: int | None = None,
+    ) -> torch.Tensor:
         """
-        Parameters
-        ----------
+        Vectorized occupancy OR across all shapes.
+
+        Input
+        -----
         xyz : (..., 3) tensor
 
-        Returns
-        -------
+        Output
+        ------
         dens : (...,) tensor
-            +inf if any shape occupies the point, 0 otherwise.
+            +inf if any shape occupies the point, else 0.
         """
         assert xyz.shape[-1] == 3, "xyz must have last dim = 3"
-        if not self.shapes:
-            return torch.zeros(xyz.shape[:-1], device=xyz.device, dtype=xyz.dtype)
 
-        # Start with zeros; elementwise maximum across shapes implements OR
-        dens = torch.zeros(xyz.shape[:-1], device=xyz.device, dtype=xyz.dtype)
-        for s in self.shapes:
-            dens = torch.maximum(dens, s.density(xyz))
-        return dens
+        out_shape = xyz.shape[:-1]
+        device, dtype = xyz.device, xyz.dtype
+
+        if not self.shapes:
+            return torch.zeros(out_shape, device=device, dtype=dtype)
+
+        def _occ_mask(points_2d: torch.Tensor) -> torch.Tensor:
+            # Boolean occupancy (M,), early-exit when fully covered
+            occ = torch.zeros(points_2d.shape[0], device=device, dtype=torch.bool)
+            for s in self.shapes:
+                # shapes return 0 outside / +inf inside → isinf gives mask
+                occ |= torch.isinf(s.density(points_2d))
+                if occ.all():
+                    break
+            return occ
+
+        flat = xyz.reshape(-1, 3)
+
+        if not chunk_points or chunk_points <= 0:
+            occ = _occ_mask(flat)                       # (M,)
+            dens = torch.zeros_like(occ, dtype=dtype)   # (M,)
+            dens[occ] = float("inf")
+            return dens.view(out_shape)
+
+        # chunked path (same semantics, lower peak memory)
+        M = flat.shape[0]
+        dens = torch.zeros(M, device=device, dtype=dtype)
+        for i in range(0, M, chunk_points):
+            j = i + chunk_points
+            occ = _occ_mask(flat[i:j])
+            dens[i:j][occ] = float("inf")
+        return dens.view(out_shape)
+
 
 
 __all__ = ["Shape", "Box", "Sphere", "World"]
