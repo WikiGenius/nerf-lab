@@ -1,4 +1,4 @@
-# viz/world.py
+# viz/plot_cloud.py
 from __future__ import annotations
 
 import numpy as np

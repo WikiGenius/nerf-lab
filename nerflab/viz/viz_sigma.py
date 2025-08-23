@@ -1,4 +1,4 @@
-# viz/sigma.py
+# viz/viz_sigma.py
 from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt

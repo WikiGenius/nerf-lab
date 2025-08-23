@@ -1,4 +1,4 @@
-# viz/world.py (clean, deduplicated, optimized)
+# viz/viz_world.py (clean, deduplicated, optimized)
 from __future__ import annotations
 
 from typing import Iterable, Literal, Optional, Tuple, Union
@@ -77,10 +77,10 @@ def _viz_add_rays(ax, O_np: np.ndarray, D_np: np.ndarray, *,
     else:
         raise ValueError("ray_mode must be 'lines' or 'quiver'")
 
-def _viz_add_camera(ax, T: torch.Tensor, *, color: str, length: float, with_axes: bool) -> None:
+def _viz_add_camera(ax, cam_idx, T: torch.Tensor, *, color: str, length: float, with_axes: bool) -> None:
     """Add a camera marker and optional axes for one pose."""
     cam_pos = _to_numpy3(T[:3, 3])
-    ax.scatter(*cam_pos, s=VCFG.camera_marker_size, c=color, marker="o", label="Cam", zorder=5)
+    ax.scatter(*cam_pos, s=VCFG.camera_marker_size, c=color, marker="o", label=f"Cam{cam_idx}", zorder=5)
     if with_axes:
         draw_pose_axes(ax, T, scale=float(length) * 0.2)
 
@@ -236,7 +236,7 @@ def plot_world(
 
             # Camera marker + axes
             T = H_wc_sel[k] if is_batched else H_wc_sel
-            _viz_add_camera(ax, T, color=col, length=vis_far, with_axes=True)
+            _viz_add_camera(ax, k, T, color=col, length=vis_far, with_axes=True)
 
             if not need_rays:
                 continue  # only cameras requested

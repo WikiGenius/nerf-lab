@@ -1,4 +1,4 @@
-# nerflab/camera.py (clean & deduplicated)
+# nerflab/camera/camera.py 
 from __future__ import annotations
 from typing import Optional, Tuple, Literal, Union, Iterable
 

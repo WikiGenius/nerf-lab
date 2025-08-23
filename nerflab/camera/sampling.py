@@ -1,4 +1,4 @@
-# nerflab/sampling.py
+# nerflab/camera/sampling.py
 import torch
 from typing import Tuple, Optional, Union
 

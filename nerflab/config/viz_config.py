@@ -1,4 +1,4 @@
-# viz/_config.py
+# viz/viz_config.py
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Tuple
