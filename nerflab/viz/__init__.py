@@ -17,7 +17,8 @@ _PUBLIC = {
     "viz_world": ["plot_world"],
     "viz_sigma": ["viz_sigma_scatter", "viz_sigma_heatmap"],
     "plot_cloud": ["plot_cloud_batch_with_camera"],
-    "pose":["draw_pose_axes"]
+    "pose":["draw_pose_axes"],
+    "render":["Renderer"]
 }
 
 __all__ = ["viz_cfg"] + [name for names in _PUBLIC.values() for name in names]

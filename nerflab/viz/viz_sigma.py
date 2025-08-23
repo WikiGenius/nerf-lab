@@ -157,3 +157,5 @@ def viz_sigma_heatmap(
 
     plt.tight_layout()
     plt.show()
+
+__all__ = ["viz_sigma_heatmap", "viz_sigma_scatter"]

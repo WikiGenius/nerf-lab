@@ -23,7 +23,6 @@ _PUBLIC = {
         "get_batch_rays",        
     ],
     "io": ["query_density_field"], 
-    "sampling": ["stratified_samples_batch", "cartesian_to_spherical"]
     # in future, add other learning helpers under their module name
     # e.g. "train_utils": ["train_model", "evaluate"],
 }

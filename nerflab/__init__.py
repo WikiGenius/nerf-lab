@@ -37,8 +37,8 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "World": ("nerflab.world.geometry", "World"),
     "Box": ("nerflab.world.geometry", "Box"),
     "Sphere": ("nerflab.world.geometry", "Sphere"),
-    "save_world": ("nerflab.world.render", "save_world"),
-    "load_world": ("nerflab.world.render", "load_world"),
+    "save_world": ("nerflab.world.world_json", "save_world"),
+    "load_world": ("nerflab.world.world_json", "load_world"),
 
     # viz
     "plot_world": ("nerflab.viz.viz_world", "plot_world"),
@@ -108,7 +108,7 @@ if TYPE_CHECKING:
     from nerflab.camera.transforms import look_at, distance  # type: ignore
 
     from nerflab.world.geometry import World, Box, Sphere  # type: ignore
-    from nerflab.world.render import save_world, load_world  # type: ignore
+    from nerflab.world.world_json import save_world, load_world  # type: ignore
 
     from nerflab.viz.viz_world import plot_world  # type: ignore
     from nerflab.viz.viz_sigma import viz_sigma_heatmap, viz_sigma_scatter  # type: ignore
