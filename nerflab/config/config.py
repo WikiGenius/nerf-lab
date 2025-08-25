@@ -68,9 +68,10 @@ class RaySampleCfg:
         deterministic (bool):  If True, use fixed sampling positions; 
                                if False, jitter samples for anti-aliasing.
     """
-    t_near: float = 2.0        # start of ray sampling (scene units)
-    t_far: float = 4.0         # end of ray sampling (scene units)
-    N: int = 20                # samples per ray
+    t_near: float = 2.5        # start of ray sampling (scene units)
+    t_far: float = 3.5         # end of ray sampling (scene units)
+    # N: int = 20                # samples per ray
+    N: int = 40                # samples per ray
     R: int = 4096              # total number of rays (e.g., batch size)
     deterministic: bool = False  # toggle deterministic vs. randomized sampling
 

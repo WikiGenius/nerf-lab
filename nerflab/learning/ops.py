@@ -139,25 +139,3 @@ def sample_and_render(
 
     return C, depth, sigma
 
-def get_batch_rays(
-    H: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Generate ray origins and directions given camera intrinsics and pose.
-
-    Args:
-        H: (4,4) camera-to-world transform.
-
-    Returns:
-        O_w: (R,3) ray origins.
-        D_w: (R,3) ray directions.
-    """
-    intr  = Intrinsics(**CFG.intrinsics.__dict__)
-    cam = Camera(intr, H, t_bounds=(CFG.rays.t_near, CFG.rays.t_far))
-    rays_per_pose = CFG.rays.R
-    O_all, D_all = cam.get_rays(frame='world')
-    idx = torch.randperm(O_all.shape[0])[:rays_per_pose]
-
-    O_batch, D_batch = torch.from_numpy(O_all[idx]), torch.from_numpy(D_all[idx])
-    return O_batch, D_batch
-
