@@ -63,16 +63,17 @@ def viz_sigma_scatter(
         Matplotlib colormap name; defaults to VCFG.cmap.
     add_triad : bool
         If True, draw a small XYZ triad in world coordinates.
-    """
-    # 1) Sanitize NaNs and Infs
-    sigma = torch.nan_to_num(sigma, nan=0.0, posinf=max_sigma, neginf=0.0)
-
-    # 2) Clamp to valid ranges
-    sigma = sigma.clamp(min=0.0, max=max_sigma)
-    
+    """    
     # Convert inputs → NumPy float32
     Pn = _to_numpy_f32(pts)
     Sn = _to_numpy_f32(sigma)
+    
+    # 1) Sanitize NaNs and Infs
+    Sn = np.nan_to_num(Sn, nan=0.0, posinf=max_sigma, neginf=0.0)
+
+    # 2) Clamp to valid ranges
+    Sn = Sn.clip(min=0.0, max=max_sigma)
+    
     # Validate shapes and flatten
     _R, _N = _validate_shapes_scatter(Pn, Sn)
     P = Pn.reshape(-1, 3)  # (R*N, 3)
@@ -146,14 +147,16 @@ def viz_sigma_heatmap(
     cmap   : str | None      → defaults to VCFG.heatmap_cmap
     figsize: (w, h) | None   → defaults to VCFG.heatmap_size or (8, 4)
     """
-    # 1) Sanitize NaNs and Infs
-    sigma = torch.nan_to_num(sigma, nan=0.0, posinf=max_sigma, neginf=0.0)
 
-    # 2) Clamp to valid ranges
-    sigma = sigma.clamp(min=0.0, max=max_sigma)
     
     S = _to_numpy_f32(sigma)
 
+    # 1) Sanitize NaNs and Infs
+    S = np.nan_to_num(S, nan=0.0, posinf=max_sigma, neginf=0.0)
+
+    # 2) Clamp to valid ranges
+    S = S.clip(min=0.0, max=max_sigma)
+    
     if S.ndim != 2:
         raise ValueError(f"`sigma` must be shape (R, N); got {S.shape}")
 
