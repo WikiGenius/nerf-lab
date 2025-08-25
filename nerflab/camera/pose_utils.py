@@ -48,7 +48,7 @@ def fibonacci_points(
 
     # Golden angle
     phi = math.pi * (3.0 - math.sqrt(5.0))
-    theta = (i - float(start)) * phi + yaw_offset  # stable phase
+    theta = i * phi + yaw_offset  # stable phase
 
     x = r_xy * torch.cos(theta)
     z = r_xy * torch.sin(theta)
