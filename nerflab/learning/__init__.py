@@ -22,7 +22,6 @@ _PUBLIC = {
         "sample_and_render",
         "get_batch_rays",        
     ],
-    "io": ["query_density_field"], 
     # in future, add other learning helpers under their module name
     # e.g. "train_utils": ["train_model", "evaluate"],
 }

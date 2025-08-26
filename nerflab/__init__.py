@@ -39,7 +39,8 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "Sphere": ("nerflab.world.geometry", "Sphere"),
     "save_world": ("nerflab.world.world_json", "save_world"),
     "load_world": ("nerflab.world.world_json", "load_world"),
-
+    "query_density_field": ("nerflab.world.world_json", "query_density_field"),
+    
     # viz
     "plot_world": ("nerflab.viz.viz_world", "plot_world"),
     "viz_sigma_heatmap": ("nerflab.viz.viz_sigma", "viz_sigma_heatmap"),

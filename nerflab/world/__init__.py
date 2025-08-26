@@ -7,5 +7,5 @@ from .world_json import save_world, load_world
 
 __all__ = [
     "Box", "Sphere",
-    "save_world", "load_world"
+    "save_world", "load_world", "query_density_field"
 ]
