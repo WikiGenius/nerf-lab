@@ -1,7 +1,7 @@
 # nerflab/viz/render.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Literal
 
 import os
 import builtins as _bi
@@ -46,9 +46,14 @@ class BinaryRenderCfg:
     show_axis : bool
         Whether to show axis ticks/frame.
     figsize : (float, float) | None
-        Figure size; None uses rcParams default.
+        Preferred figure size in inches when not saving (or when save_via='mpl' without hw/intr).
     dpi : int | None
-        Figure DPI; None uses rcParams default.
+        Figure DPI when using Matplotlib.
+    save_via : 'pil' | 'mpl'
+        - 'pil' saves the rendered binary array directly via Pillow (exact pixels; fastest).
+        - 'mpl' uses Matplotlib (for on-figure titles/overlays); we still pin W×H on save.
+    save_verify : bool
+        If True, reopen the saved file and assert its size == (W, H).
     """
     round_ndigits: Optional[int] = 2
     threshold: float = 0.5
@@ -56,6 +61,8 @@ class BinaryRenderCfg:
     show_axis: bool = False
     figsize: Optional[Tuple[float, float]] = None
     dpi: Optional[int] = None
+    save_via: Literal["pil", "mpl"] = "pil"
+    save_verify: bool = False
 
 
 # -----------------------------------------------------------------------------
@@ -74,6 +81,7 @@ def _as_int(x: Any) -> int:
     if isinstance(x, np.generic):
         x = np.asarray(x).item()
     return _bi.int(x)  # use real built-in
+
 
 def _normalize_to_numpy(a: Any) -> np.ndarray:
     """Accept np.ndarray, sequences, or torch.Tensor and return a numpy array (no copy if possible)."""
@@ -129,7 +137,7 @@ def _ensure_hw(
     elif intr is not None:
         H, W = _get_hw_from_intr(intr)
     else:
-        N = np.size(C_flat)  # no int() cast; safe even if `int` is shadowed
+        N = np.size(C_flat)
         r = _bi.int(round(N ** 0.5))
         if r * r != N:
             raise ValueError(
@@ -146,6 +154,24 @@ def _ensure_hw(
     return H, W
 
 
+def _save_exact_pil(im2d: np.ndarray, save_path: str) -> None:
+    """Save a (H,W) float32/float64/uint8 array as L-mode PNG with exact pixels."""
+    from PIL import Image
+    if im2d.dtype != np.uint8:
+        im_u8 = np.clip(im2d * 255.0, 0, 255).astype(np.uint8)
+    else:
+        im_u8 = im2d
+    Image.fromarray(im_u8, mode="L").save(save_path)
+
+
+def _verify_saved_size(save_path: str, expected_hw: Tuple[int, int]) -> None:
+    """Reopen image and assert (W,H) == expected (W,H)."""
+    from PIL import Image
+    Wexp, Hexp = expected_hw[1], expected_hw[0]
+    w, h = Image.open(save_path).size
+    assert (w, h) == (Wexp, Hexp), f"Saved {w}x{h}, expected {Wexp}x{Hexp} for {save_path}"
+
+
 # -----------------------------------------------------------------------------
 # Public API
 # -----------------------------------------------------------------------------
@@ -153,7 +179,7 @@ def render_binary_image(
     C: Any,
     *,
     intr: Optional[_HasHW] = None,
-    hw: Optional[Tuple[int, int]] = None,
+    hw: Optional[Tuple[int, int]] = None,   # (H, W) here to match NumPy shape semantics
     cfg: BinaryRenderCfg = BinaryRenderCfg(),
     ax: Optional[Axes] = None,
     title: Optional[str] = None,
@@ -170,11 +196,11 @@ def render_binary_image(
     intr : object with `.height` and `.width`, optional
         Intrinsics-like object to infer (H, W) when C is flat.
     hw : (H, W), optional
-        Explicit image shape (overrides `intr`).
+        Explicit image shape (overrides `intr`). Note: (H,W) ordering here.
     cfg : BinaryRenderCfg
-        Rendering configuration (rounding, threshold, interpolation, axis, size).
+        Rendering configuration (rounding, threshold, interpolation, axis, size, saving policy).
     ax : matplotlib.axes.Axes, optional
-        Existing axes to draw on; if None, a new figure/axes is created.
+        Existing axes to draw on; if None, a new figure/axes is created (only if needed).
     title : str, optional
         Plot title.
     save_path : str, optional
@@ -187,12 +213,8 @@ def render_binary_image(
     (fig, ax, im2d) or im2d
         - fig : matplotlib.figure.Figure
         - ax  : matplotlib.axes.Axes
-        - im2d: (H, W) np.ndarray of dtype float32 (0.0 or 1.0) used for rendering.
-
-    Notes
-    -----
-    - This function does NOT call `plt.show()`.
-    - Uses a fixed black/white colormap with hard boundaries for crisp binary visuals.
+        - im2d: (H, W) np.ndarray of dtype uint8 (0 or 255) if saved via PIL,
+                or float32 (0.0 or 1.0) for rendering context.
     """
     C_np = _normalize_to_numpy(C)
     if C_np.ndim == 2 and hw is None and intr is None:
@@ -211,10 +233,27 @@ def render_binary_image(
     # Binarize (>= threshold -> 1.0, else 0.0)
     im2d = (C_flat >= float(cfg.threshold)).astype(np.float32, copy=False).reshape(H, W)
 
-    # Figure / axes
+    # Fast path: if saving via PIL and no Matplotlib axes requested
+    if save_path is not None and cfg.save_via == "pil" and ax is None and not return_fig_ax:
+        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+        _save_exact_pil(im2d, save_path)
+        if cfg.save_verify:
+            _verify_saved_size(save_path, (H, W))
+        return im2d
+
+    # Otherwise, use Matplotlib for display (and optionally for saving)
+    created_fig = False
     if ax is None:
-        fig = plt.figure(figsize=cfg.figsize, dpi=cfg.dpi)
+        # If we know W,H and want exact pixels on MPL save, set inches from DPI
+        dpi = cfg.dpi or plt.rcParams.get("figure.dpi", 100)
+        if cfg.save_via == "mpl" and (intr is not None or hw is not None):
+            fig_w_in = W / dpi
+            fig_h_in = H / dpi
+            fig = plt.figure(figsize=(fig_w_in, fig_h_in), dpi=dpi)
+        else:
+            fig = plt.figure(figsize=cfg.figsize, dpi=cfg.dpi)
         ax = fig.add_subplot(111)
+        created_fig = True
     else:
         fig = ax.figure
 
@@ -230,13 +269,34 @@ def render_binary_image(
         ax.axis("off")
     if title:
         ax.set_title(title)
-    fig.tight_layout()
+
+    # IMPORTANT: don't use tight bbox (it changes pixel size on save)
+    # Also avoid fig.tight_layout() here for exact-pixel saves.
     # Save if requested
     if save_path is not None:
         os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
-        fig.savefig(save_path, bbox_inches="tight", pad_inches=0)
+        if cfg.save_via == "pil":
+            # Save via PIL (exact pixels)
+            _save_exact_pil(im2d, save_path)
+        else:
+            # Save via Matplotlib while pinning exact pixels:
+            # Ensure DPI/inches are consistent with W×H
+            dpi = cfg.dpi or fig.get_dpi()
+            # If figure was not created with pinned inches, pin it now:
+            if (intr is not None or hw is not None):
+                fig.set_size_inches(W / dpi, H / dpi, forward=True)
+            fig.savefig(save_path, dpi=dpi, bbox_inches=None, pad_inches=0)
+        if cfg.save_verify:
+            _verify_saved_size(save_path, (H, W))
 
-    return (fig, ax, im2d) if return_fig_ax else im2d
+    # Return
+    if return_fig_ax:
+        return fig, ax, im2d
+    else:
+        # Clean up created figure if not needed
+        if created_fig:
+            plt.close(fig)
+        return im2d
 
 
 # -----------------------------------------------------------------------------
@@ -248,7 +308,7 @@ class Renderer:
 
     Example
     -------
-    >>> rnd = Renderer(cfg=BinaryRenderCfg(threshold=0.5))
+    >>> rnd = Renderer(cfg=BinaryRenderCfg(threshold=0.5, save_via="pil"))
     >>> fig, ax, mask = rnd.binary(C, intr=intr, title="Opacity Mask")
     """
     def __init__(self, cfg: Optional[BinaryRenderCfg] = None) -> None:
@@ -259,7 +319,7 @@ class Renderer:
         C: Any,
         *,
         intr: Optional[_HasHW] = None,
-        hw: Optional[Tuple[int, int]] = None,
+        hw: Optional[Tuple[int, int]] = None,  # (H, W)
         ax: Optional[Axes] = None,
         title: Optional[str] = None,
         save_path: Optional[str] = None,
@@ -276,4 +336,4 @@ class Renderer:
             return_fig_ax=return_fig_ax,
         )
 
-__all__ = ["Renderer"]
+__all__ = ["Renderer", "BinaryRenderCfg", "render_binary_image"]
