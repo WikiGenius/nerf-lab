@@ -4,7 +4,7 @@ import os, glob
 from typing import Dict, Any, List, Optional, Tuple
 import numpy as np
 import torch
-
+from PIL import Image
 from ._common import read_json, as_tensor_like, stack_arrays
 
 
@@ -265,3 +265,175 @@ def validate_loaded_batch(batch: Dict[str, Any], atol: float = 1e-5) -> None:
             diffs = np.diff(t, axis=-1)
             ok = np.all(diffs >= -atol)
         assert bool(ok), "t must be non-decreasing along last dim"
+
+
+def _frame_id_index(scene_dir: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Build a dict {frame_id: frame_dict} from transforms.json.
+    """
+    tr = load_transforms(scene_dir)
+    frames = tr.get("frames", [])
+    return {f["id"]: f for f in frames}
+
+def _resolve_image_path(scene_dir: str, frame: Dict[str, Any]) -> str:
+    """
+    Resolve an image path from a frame entry in transforms.json.
+    Supports either 'file_path' or nested 'image' objects commonly used.
+    """
+    # Common conventions: "file_path" or "image": {"file_path": ...}
+    fp = frame.get("file_path")
+    if fp is None and isinstance(frame.get("image"), dict):
+        fp = frame["image"].get("file_path")
+    if fp is None:
+        raise KeyError(f"No image file path found for frame id '{frame.get('id','?')}'. "
+                       "Expected 'file_path' or 'image.file_path' in transforms.json.")
+    # Many manifests store a relative path; make absolute to scene_dir.
+    abs_path = os.path.join(scene_dir, fp) if not os.path.isabs(fp) else fp
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"Image for frame '{frame.get('id','?')}' not found: {abs_path}")
+    return abs_path
+
+def _load_image(
+    path: str,
+    *,
+    mode: str = "RGB",
+    resize: Optional[Tuple[int, int]] = None,  # (W, H)
+    as_torch: bool = True,
+    chw: bool = True,
+    normalize: bool = True,
+    device: Optional[torch.device] = None,
+    float_dtype: torch.dtype = torch.float32,
+):
+    """
+    Load a single image from disk with optional resize and tensor conversion.
+    Returns (img, (W, H)) where img is a tensor/ndarray and (W,H) are the final dims.
+    """
+    with Image.open(path) as im:
+        if mode is not None:
+            im = im.convert(mode)
+        if resize is not None:
+            # Pillow expects (W, H)
+            im = im.resize(resize, Image.BILINEAR)
+        W, H = im.size
+        arr = np.array(im)  # (H,W,C) uint8
+
+    if as_torch:
+        t = torch.from_numpy(arr)  # uint8
+        if normalize:
+            t = t.to(device or torch.device("cpu"), dtype=float_dtype) / 255.0
+        else:
+            t = t.to(device or torch.device("cpu"))
+        # (H,W,C) -> (C,H,W) if requested
+        if chw:
+            t = t.permute(2, 0, 1).contiguous()
+        return t, (W, H)
+    else:
+        if normalize:
+            arr = arr.astype(np.float32) / 255.0
+        return arr, (W, H)
+
+def load_batch_simple(
+    scene_dir: str,
+    frame_ids: List[str],
+    *,
+    resize: Optional[Tuple[int, int]] = None,   # (W, H) — set to ensure uniform shapes
+    color_mode: str = None,                    # None keeps source mode
+    chw: bool = False,                           # True: (B,C,H,W); False: (B,H,W,C)
+    as_torch: bool = True,
+    device: Optional[torch.device] = None,
+    float_dtype: torch.dtype = torch.float32,
+    normalize: bool = True,                     # True -> float in [0,1]; False -> uint8
+) -> Dict[str, Any]:
+    """
+    Minimal loader that returns only camera poses and raw images.
+
+    Args
+    ----
+    scene_dir : str
+        Root directory containing transforms.json and images.
+    frame_ids : List[str]
+        Frame identifiers to load (must exist in transforms.json).
+    resize : Optional[(W,H)]
+        If provided, all images are resized to (W,H). Recommended for batching.
+    color_mode : str
+        Pillow convert() mode (e.g., 'RGB', 'L', None to keep original).
+    chw : bool
+        If True, images stacked as (B,C,H,W). Otherwise (B,H,W,C).
+    as_torch : bool
+        Return tensors on `device` (else numpy arrays).
+    normalize : bool
+        If True, outputs float in [0,1]. If False and as_torch, dtype=uint8.
+
+    Returns
+    -------
+    Dict[str, Any]
+        {
+          "H_wc": (B,4,4) torch.Tensor,
+          "images": (B,C,H,W) or (B,H,W,C) tensor/ndarray,
+          "image_paths": List[str],
+          "width": int,     # final width
+          "height": int,    # final height
+          "frame_ids": List[str],
+        }
+
+    Notes
+    -----
+    - If images have differing sizes and `resize` is None, this function raises.
+      Provide `resize=(W,H)` to enforce uniform dimensions.
+    """
+    if len(frame_ids) == 0:
+        raise ValueError("Empty frame_ids list.")
+
+    # Resolve metadata for requested frames
+    idx = _frame_id_index(scene_dir)
+    missing = [fid for fid in frame_ids if fid not in idx]
+    if missing:
+        raise KeyError(f"frame_ids not found in transforms.json: {missing}")
+
+    frames = [idx[fid] for fid in frame_ids]
+    image_paths = [_resolve_image_path(scene_dir, f) for f in frames]
+
+    # Load poses using existing helper (returns torch.Tensor)
+    H_wc = get_H_wc_batch(scene_dir, frame_ids)  # (B,4,4)
+    if device is not None:
+        H_wc = H_wc.to(device)
+
+    # Load images
+    imgs = []
+    sizes = []
+    for p in image_paths:
+        img, (W, H) = _load_image(
+            p,
+            mode=color_mode,
+            resize=resize,
+            as_torch=as_torch,
+            chw=chw,
+            normalize=normalize,
+            device=device,
+            float_dtype=float_dtype,
+        )
+        imgs.append(img)
+        sizes.append((W, H))
+
+    # Ensure uniform sizes (unless we resized)
+    uniq_sizes = set(sizes)
+    if len(uniq_sizes) != 1:
+        hint = "Provide resize=(W,H) to enforce a common shape."
+        raise ValueError(f"Images have differing sizes: {sorted(uniq_sizes)}. {hint}")
+
+    W_final, H_final = sizes[0]
+
+    # Stack
+    if as_torch:
+        images = torch.stack(imgs, dim=0)
+    else:
+        images = np.stack(imgs, axis=0)
+
+    return {
+        "H_wc": H_wc,                 # (B,4,4)
+        "images": images,             # (B,C,H,W) or (B,H,W,C)
+        "image_paths": image_paths,   # List[str]
+        "width": int(W_final),
+        "height": int(H_final),
+        "frame_ids": frame_ids,
+    }

@@ -145,6 +145,7 @@ def save_batch_frames(
     render_png: bool = True,
     binary_threshold: float = 0.5,
     path_world: str = "../data/world.json",
+    set_title=False
 ) -> List[str]:
     """
     End-to-end pipeline per batch:
@@ -238,7 +239,7 @@ def save_batch_frames(
             img_dir = os.path.join(scene_dir, "images", split)
             ensure_dir(img_dir)
             png_path = os.path.join(img_dir, f"{frame_id}.png")
-            fig, ax, _ = rnd.binary(C_img, intr=camera.intr, title=f"Opacity {frame_id}", save_path=png_path)
+            fig, ax, _ = rnd.binary(C_img, intr=camera.intr, title=f"Opacity {frame_id}" if set_title else "", save_path=png_path)
             try:
                 import matplotlib.pyplot as plt
                 plt.close(fig)
