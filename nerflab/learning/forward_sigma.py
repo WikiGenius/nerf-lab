@@ -21,18 +21,18 @@ def nerf_opacity(
       τᵢ = ∑_{j<i} σⱼ·Δⱼ    is the optical thickness up to (but not including) i.
 
     Args:
-        sigma (torch.Tensor):  Densities, shape (R, N)
-        delta (torch.Tensor):  Distances between samples, shape (R, N)
+        sigma (torch.Tensor):  Densities, shape (B, R, N), (R, N)
+        delta (torch.Tensor):  Distances between samples, shape (B, R, N), (R, N)
         max_sigma (float):     Clip any +Inf densities to this value
         full_output (bool):    If True, returns (T, w, C); otherwise returns C only
 
     Returns:
         If full_output:
-            T (torch.Tensor): Transmittance before each sample, shape (R, N)
-            w (torch.Tensor): Weights per sample,           shape (R, N)
-            C (torch.Tensor): Accumulated opacity per ray,  shape (R,)
+            T (torch.Tensor): Transmittance before each sample, shape (B, R, N), (R, N)
+            w (torch.Tensor): Weights per sample,           shape (B, R, N), (R, N)
+            C (torch.Tensor): Accumulated opacity per ray,  shape (B, R,), (R,)
         Else:
-            C (torch.Tensor): Accumulated opacity per ray, shape (R,)
+            C (torch.Tensor): Accumulated opacity per ray, shape (B, R,), (R,)
     """
     # 1) Sanitize NaNs and Infs
     sigma = torch.nan_to_num(sigma, nan=0.0, posinf=max_sigma, neginf=0.0)
@@ -43,9 +43,9 @@ def nerf_opacity(
     delta = delta.clamp(min=0.0)
 
     # 3) Compute transmittance T and weights w
-    T = compute_transmittance(sigma, delta)   # (R, N)
-    w = compute_weights(sigma, delta, T)      # (R, N)
-    C = render_opacity(sigma, delta, w)       # (R,)
+    T = compute_transmittance(sigma, delta)   # (B, R, N), (R, N)
+    w = compute_weights(sigma, delta, T)      # (B, R, N), (R, N)
+    C = render_opacity(sigma, delta, w)       # (B, R,), (R,)
 
     return (T, w, C) if full_output else C
 
@@ -61,14 +61,14 @@ def compute_opacity_simple(
       C ≈ 1 − exp(−∑ᵢ σᵢ·Δᵢ)
 
     Args:
-        sigma (torch.Tensor): Densities, shape (R, N)
-        delta (torch.Tensor): Sample distances, shape (R, N)
+        sigma (torch.Tensor): Densities, shape (B, R, N), (R, N)
+        delta (torch.Tensor): Sample distances, shape (B, R, N), (R, N)
 
     Returns:
-        C (torch.Tensor): Opacity per ray, shape (R,)
+        C (torch.Tensor): Opacity per ray, shape (B, R,), (R,)
     """
     # ∑ σᵢ·Δᵢ across samples
-    tau_total = torch.sum(sigma * delta, dim=1)     # (R,)
+    tau_total = torch.sum(sigma * delta, dim=-1)     # (R,) (B, R,)
     # analytic opacity
     return 1.0 - torch.exp(-tau_total)
 
