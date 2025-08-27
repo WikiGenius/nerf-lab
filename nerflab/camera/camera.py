@@ -183,6 +183,7 @@ class Camera:
     # ---------------------------------------------------------------------- #
     # Public API — Rays (full grid or sampled)
     # ---------------------------------------------------------------------- #
+    @torch.no_grad()
     def get_rays(
         self,
         frame: Literal["camera", "world"] = "world",
