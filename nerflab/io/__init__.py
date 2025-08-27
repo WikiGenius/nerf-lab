@@ -22,6 +22,12 @@ from .dataset_save import (
     save_batch_frames,
 )
 
+from .io_utils import (
+    discover_cfg_hash,
+    list_frame_npz,
+    frame_ids_from_paths,
+    camera_from_loaded_H,
+)
 __all__ = [
     # loading
     "list_cfg_hashes",
