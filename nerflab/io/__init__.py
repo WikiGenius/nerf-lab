@@ -36,4 +36,9 @@ __all__ = [
     "upsert_transforms_json",
     "write_cfg_json",
     "save_batch_frames",
+    # io_utils
+    "discover_cfg_hash"
+    "list_frame_npz"
+    "frame_ids_from_paths"
+    "camera_from_loaded_H"
 ]
