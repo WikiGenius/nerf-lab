@@ -1,50 +1,46 @@
 """
-Sigma Visualization Utilities (self‑contained, well‑documented)
+Sigma Visualization — Standard, Optimized, and Well‑Documented
 ===============================================================
 
-This module provides a compact, production‑ready toolkit to visualize per‑sample
-NeRF density (sigma, σ) along rays. It is **self‑contained** (no external
-`nerflab` imports) and focuses on clarity, speed, and ergonomics.
+A single, cohesive module for inspecting NeRF per‑sample density (sigma, σ)
+across rays. It merges and standardizes the functionality from your two
+previous files into a consistent, dependency‑light API.
 
-What's inside
--------------
-- `choose_strides(...)` — Pick integer strides `(stride_r, stride_n)` so that a
-  large `(R, N)` grid is sub‑sampled to a target number of points without
-  overwhelming your plots.
-- `viz_sigma_scatter(...)` — 3‑D scatter of sample points `(x, y, z)` colored by
-  σ.
-- `viz_sigma_heatmap(...)` — 2‑D heatmap of σ with axes `(ray, sample)`.
-- `plot_nonzero_sigma_row(...)` — Inspect a single ray’s σ profile and mark the
-  nonzero region(s).
-- `visualize_sigma(...)` — High‑level orchestrator: scatter + heatmap + row
-  inspection with sensible defaults and safety checks.
+Highlights
+----------
+- **Self‑contained**: Only NumPy + Matplotlib (Torch is optional).
+- **Deterministic subsampling**: Integer stride policy with safety fallback.
+- **Robust I/O**: Works with NumPy arrays or torch.Tensors (auto‑CPU detach).
+- **Clean plots**: 3‑D scatter, (R×N) heatmap, and single‑row inspector.
+- **Utilities**: row selection by non‑zero, random/max strategies, safe
+  broadcasting of `t`.
 
-Design notes
-------------
-- Torch is **optional**. If you pass `torch.Tensor`, tensors are detached and
-  moved to CPU internally.
-- All functions sanitize NaNs/±Inf and clamp σ ≥ 0.
-- Subsampling is conservative and reproducible (NumPy Generator).
+Public API
+----------
+- choose_strides(Rtot, Ntot, *, max_scatter_points=5000, max_samples_axis=16)
+- viz_sigma_scatter(pts, sigma, *, clip_max=100.0, max_points=None, cmap=None,
+                   add_triad=True, title=None, show=True)
+- viz_sigma_heatmap(sigma, *, clip_max=100.0, cmap=None, figsize=None,
+                    title=None, show=True)
+- plot_nonzero_sigma_row(t, sigma, *, row_idx=None, clip_max=1000.0,
+                         rng=None, strategy="random", ax=None, show=True,
+                         mark_nonzero=False, empty="fallback") -> int
+- visualize_sigma((t, delta, pts), sigma_full, *[, options...]) -> dict
+- to_numpy(x) / to_numpy_f32(x, clip_max=None, clamp_nonneg=False)
+- rows_with_nonzero(sigma) -> np.ndarray
+- pick_random_nonzero_entry(sigma, rng=None) -> (r, c)
 
 Example
 -------
->>> # Fake data for demonstration (R=64 rays, N=128 samples)
->>> import numpy as np, torch
->>> R, N = 64, 128
->>> t     = torch.linspace(0, 1, N).repeat(R, 1)                         # (R,N)
->>> delta = torch.full_like(t, 1.0 / N)                                   # (R,N)
->>> pts   = torch.randn(R, N, 3) * 0.5 + torch.tensor([0, 0, 2.0])       # (R,N,3)
->>> sigma = torch.relu(torch.sin(8 * t) + 0.1 * torch.randn(R, N))       # (R,N)
->>> samples = (t, delta, pts)
->>> out = visualize_sigma(samples, sigma, max_scatter_points=6000,
-...                       max_samples_axis=32, clip_max=50.0)
->>> print(out)
-{'row_used': 13, 'peak_sigma': 0.98, 'peak_t': 0.73, 'stride_r': 2, 'stride_n': 4}
-
-Dependencies
-------------
-- numpy, matplotlib
-- (optional) torch
+>>> import numpy as np
+>>> R, N = 32, 128
+>>> t = np.tile(np.linspace(0, 1, N), (R, 1))
+>>> pts = np.random.randn(R, N, 3) * 0.3 + np.array([0, 0, 2.0])
+>>> sigma = np.clip(np.sin(8*t) + 0.15*np.random.randn(R, N), 0, None)
+>>> out = visualize_sigma((t, None, pts), sigma, max_scatter_points=6000,
+...                       max_samples_axis=24, clip_max=3.0)
+>>> out["stride_r"], out["stride_n"]
+(2, 6)
 """
 from __future__ import annotations
 
@@ -53,45 +49,82 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 
-try:  # Torch is optional
+try:  # Optional torch support
     import torch
     _HAS_TORCH = True
 except Exception:  # pragma: no cover
     torch = None  # type: ignore
     _HAS_TORCH = False
 
+ArrayLike = Union[np.ndarray, "torch.Tensor"]
 
 # =============================================================================
-# Basic utilities
+# Conversion & validation helpers
 # =============================================================================
 
-def _to_numpy_f32(x: Union[np.ndarray, "torch.Tensor"], *, clip_max: Optional[float] = None) -> np.ndarray:
-    """Return a contiguous float32 NumPy array.
+def to_numpy(x: ArrayLike) -> np.ndarray:
+    """Convert to `np.ndarray` (no dtype changes).
 
-    - If `x` is a torch tensor, it is detached and moved to CPU.
-    - Otherwise, converts via `np.asarray`.
-    - If `clip_max` is provided, values above it are clipped.
+    - torch.Tensor → detach → cpu → numpy
+    - else → `np.asarray(x)`
     """
-    if _HAS_TORCH and isinstance(x, torch.Tensor):
-        x = x.detach().to("cpu")
-        arr = x.numpy()
-    else:
-        arr = np.asarray(x, dtype=np.float32)
-    arr = np.asarray(arr, dtype=np.float32)
+    if _HAS_TORCH and isinstance(x, torch.Tensor):  # type: ignore[arg-type]
+        x = x.detach().cpu().numpy()  # type: ignore[union-attr]
+    return np.asarray(x)
+
+
+def to_numpy_f32(
+    x: ArrayLike,
+    *,
+    clip_max: Optional[float] = None,
+    clamp_nonneg: bool = False,
+) -> np.ndarray:
+    """Return a contiguous `float32` NumPy array with optional clipping.
+
+    Parameters
+    ----------
+    x : array_like or torch.Tensor
+    clip_max : float | None
+        If given, clip values to [0, clip_max] and sanitize NaN/±Inf.
+    clamp_nonneg : bool
+        If True, clamp negatives to 0.
+    """
+    arr = to_numpy(x).astype(np.float32, copy=False)
     if clip_max is not None:
-        arr = np.nan_to_num(arr, nan=0.0, posinf=clip_max, neginf=0.0).clip(0.0, clip_max)
-    return arr
+        arr = np.nan_to_num(arr, nan=0.0, posinf=clip_max, neginf=0.0)
+        arr = np.clip(arr, 0.0, float(clip_max))
+    if clamp_nonneg:
+        arr = np.maximum(arr, 0.0)
+    return np.ascontiguousarray(arr)
 
 
-def _validate_shapes(pts: np.ndarray, sigma: np.ndarray) -> Tuple[int, int]:
-    """Validate shapes for `(R, N, 3)` points and `(R, N)` sigma arrays."""
+def _validate_pts_sigma(pts: np.ndarray, sigma: np.ndarray) -> Tuple[int, int]:
+    """Validate `(R,N,3)` points and `(R,N)` sigma; return `(R,N)`.
+    Raises `ValueError` on mismatch.
+    """
     if pts.ndim != 3 or pts.shape[-1] != 3:
-        raise ValueError(f"pts must be shape (R, N, 3); got {pts.shape}")
+        raise ValueError(f"`pts` must be (R, N, 3); got {pts.shape}.")
     if sigma.ndim != 2 or sigma.shape != pts.shape[:2]:
         raise ValueError(
-            f"sigma must be shape (R, N) matching pts; got {sigma.shape} vs {pts.shape}"
+            f"`sigma` must be (R, N) matching `pts`; got {sigma.shape} vs {pts.shape}."
         )
     return int(pts.shape[0]), int(pts.shape[1])
+
+
+def _broadcast_t(t: ArrayLike, shape: Tuple[int, int]) -> np.ndarray:
+    """Return `t` broadcast to (R,N). Accepts (N,) or (R,N)."""
+    R, N = shape
+    T = to_numpy(t)
+    if T.ndim == 1:
+        if T.shape[0] != N:
+            raise ValueError(f"`t` length {T.shape[0]} != N {N}.")
+        T = np.broadcast_to(T, (R, N))
+    elif T.ndim == 2:
+        if T.shape != (R, N):
+            raise ValueError(f"`t` shape {T.shape} must equal (R, N)=({R}, {N}).")
+    else:
+        raise ValueError("`t` must be 1‑D (N,) or 2‑D (R,N).")
+    return T
 
 
 # =============================================================================
@@ -105,47 +138,32 @@ def choose_strides(
     max_scatter_points: int = 5_000,
     max_samples_axis: int = 16,
 ) -> Tuple[int, int, int, int]:
-    """Choose strides `(stride_r, stride_n)` for subsampling a large `(R, N)` grid.
+    """Choose `(stride_r, stride_n)` to downsample an (R,N) grid.
 
-    The goal is to keep the scatter plot to roughly `max_scatter_points` while
-    also capping the number of samples per ray to about `max_samples_axis`.
+    Strategy
+    --------
+    1) Limit per‑ray samples: choose `stride_n` so post‑subsample `N' ≤ max_samples_axis`.
+    2) With `N'` fixed, pick `stride_r` s.t. `R' * N' ≈ max_scatter_points`.
+    3) If rounding overshoots budget, increment `stride_r`.
+    4) Final safeguard: sqrt heuristic on total points.
 
-    Parameters
-    ----------
-    Rtot, Ntot : int
-        Full ray and per‑ray sample counts.
-    max_scatter_points : int, default 5000
-        Approximate budget for the number of *displayed* points in the 3‑D scatter.
-    max_samples_axis : int, default 16
-        Upper bound for `N'` (the number of samples per ray after subsampling).
-
-    Returns
-    -------
-    (stride_r, stride_n, Rprime, Nprime) : tuple of ints
-        The chosen strides and the resulting subsampled sizes.
-
-    Notes
-    -----
-    - Uses ceiling‑style integer arithmetic.
-    - If the initial estimate still exceeds the budget due to rounding, we
-      iteratively increase `stride_r`.
-    - As a last resort, we fall back to a `sqrt` heuristic on total points.
+    Returns `(stride_r, stride_n, Rprime, Nprime)`.
     """
-    # Step 1: cap samples per ray (N')
+    # Step 1: cap samples per ray
     stride_n = max(1, (Ntot + max_samples_axis - 1) // max_samples_axis)  # ceil
     Nprime = max(1, Ntot // stride_n)
 
-    # Step 2: pick rays so R' * N' ≈ max_scatter_points
+    # Step 2: approximate rays count given the point budget
     Rprime_target = max(1, max_scatter_points // Nprime)
     stride_r = max(1, (Rtot + Rprime_target - 1) // Rprime_target)  # ceil
     Rprime = max(1, Rtot // stride_r)
 
-    # Tighten if rounding overshot the budget
+    # Step 3: tighten if needed
     while Rprime * Nprime > max_scatter_points and stride_r < Rtot:
         stride_r += 1
         Rprime = max(1, Rtot // stride_r)
 
-    # Emergency fallback: sqrt heuristic
+    # Step 4: safeguard for extreme cases
     if Rprime * Nprime > max_scatter_points:
         stride_r = max(1, int(math.sqrt(max(1, (Rtot * Ntot) / max_scatter_points))))
         stride_n = max(1, Ntot // max_samples_axis)
@@ -156,12 +174,32 @@ def choose_strides(
 
 
 # =============================================================================
+# Small axis helpers (pure Matplotlib)
+# =============================================================================
+
+def _draw_triad(ax: plt.Axes, *, length: float = 0.2) -> None:
+    ax.quiver(0, 0, 0, length, 0, 0)
+    ax.quiver(0, 0, 0, 0, length, 0)
+    ax.quiver(0, 0, 0, 0, 0, length)
+    ax.text(length, 0, 0, 'X')
+    ax.text(0, length, 0, 'Y')
+    ax.text(0, 0, length, 'Z')
+
+
+def _style_3d_axis(ax: plt.Axes) -> None:
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.view_init(elev=20, azim=-60)
+
+
+# =============================================================================
 # Visualization primitives
 # =============================================================================
 
 def viz_sigma_scatter(
-    pts: Union[np.ndarray, "torch.Tensor"],
-    sigma: Union[np.ndarray, "torch.Tensor"],
+    pts: ArrayLike,
+    sigma: ArrayLike,
     *,
     clip_max: float = 100.0,
     max_points: Optional[int] = None,
@@ -170,49 +208,43 @@ def viz_sigma_scatter(
     title: Optional[str] = None,
     show: bool = True,
 ):
-    """Scatter 3‑D sample points `(x, y, z)` colored by σ.
+    """3‑D scatter of sample points `(x, y, z)` colored by σ.
 
     Parameters
     ----------
-    pts : (R, N, 3) ndarray or torch.Tensor
-    sigma : (R, N) ndarray or torch.Tensor
-    clip_max : float, default 100.0
-        Clamp σ to `[0, clip_max]` for a stable colorbar.
+    pts : (R, N, 3)
+    sigma : (R, N)
+    clip_max : float
+        Clip σ to [0, clip_max] for a stable colorbar.
     max_points : int | None
         If set and total points exceed this value, randomly subsample to speed up plotting.
     cmap : str | None
-        Matplotlib colormap (e.g., 'viridis'). Defaults to Matplotlib's default.
-    add_triad : bool, default True
-        If True, draws a small XYZ triad at the origin for orientation.
+    add_triad : bool
     title : str | None
-    show : bool, default True
-        If True, `plt.show()` is called.
+    show : bool
 
     Returns
     -------
     (fig, ax)
     """
-    Pn = _to_numpy_f32(pts)
-    Sn = _to_numpy_f32(sigma)
+    Pn = to_numpy_f32(pts)
+    Sn = to_numpy_f32(sigma, clip_max=clip_max, clamp_nonneg=True)
+    _validate_pts_sigma(Pn, Sn)
 
-    Pn = _to_numpy_f32(pts)
-    Sn = _to_numpy_f32(sigma, clip_max=clip_max)
-
-    _R, _N = _validate_shapes(Pn, Sn)
     P = Pn.reshape(-1, 3)
     S = Sn.reshape(-1)
 
-    # Optional subsampling
     M = P.shape[0]
     if isinstance(max_points, int) and max_points > 0 and M > max_points:
         rng = np.random.default_rng(0)  # fixed seed for reproducibility
         sel = rng.choice(M, size=max_points, replace=False)
         P, S = P[sel], S[sel]
+        M = max_points
 
     fig = plt.figure(figsize=(8, 6), dpi=120)
     ax = fig.add_subplot(111, projection="3d")
 
-    if M == 0 or P.size == 0:
+    if M == 0:
         if title:
             ax.set_title(title)
         ax.text2D(0.5, 0.5, "No points to display", transform=ax.transAxes, ha="center")
@@ -238,7 +270,7 @@ def viz_sigma_scatter(
 
 
 def viz_sigma_heatmap(
-    sigma: Union[np.ndarray, "torch.Tensor"],
+    sigma: ArrayLike,
     *,
     clip_max: float = 100.0,
     cmap: Optional[str] = None,
@@ -250,21 +282,20 @@ def viz_sigma_heatmap(
 
     Parameters
     ----------
-    sigma : (R, N) ndarray or torch.Tensor
-    clip_max : float, default 100.0
+    sigma : (R, N)
+    clip_max : float
     cmap : str | None
     figsize : (w, h) | None
     title : str | None
-    show : bool, default True
+    show : bool
 
     Returns
     -------
     (fig, ax)
     """
-    S = _to_numpy_f32(sigma, clip_max=clip_max )
-    
+    S = to_numpy_f32(sigma, clip_max=clip_max, clamp_nonneg=True)
     if S.ndim != 2:
-        raise ValueError(f"sigma must be shape (R, N); got {S.shape}")
+        raise ValueError(f"`sigma` must be (R, N); got {S.shape}.")
 
     fig, ax = plt.subplots(figsize=figsize or (9, 4), dpi=120)
     im = ax.imshow(S, aspect="auto", cmap=cmap)
@@ -280,67 +311,112 @@ def viz_sigma_heatmap(
     return fig, ax
 
 
+# =============================================================================
+# Row utilities
+# =============================================================================
+
+def rows_with_nonzero(sigma: ArrayLike) -> np.ndarray:
+    """Return sorted row indices that contain at least one non‑zero entry."""
+    S = to_numpy(sigma)
+    if S.ndim != 2:
+        raise ValueError("`sigma` must be 2‑D with shape (R, N).")
+    return np.flatnonzero((S != 0).any(axis=1))
+
+
+def pick_random_nonzero_entry(
+    sigma: ArrayLike, rng: Optional[np.random.Generator] = None
+) -> Tuple[int, int]:
+    """Pick a random (row, col) where sigma != 0; raises if none exist."""
+    S = to_numpy(sigma)
+    if S.ndim != 2:
+        raise ValueError("`sigma` must be 2‑D with shape (R, N).")
+    nz = np.flatnonzero(S.ravel() != 0)
+    if nz.size == 0:
+        raise ValueError("No non‑zero entries in `sigma`.")
+    rng = rng or np.random.default_rng()
+    k = int(rng.choice(nz))
+    return tuple(map(int, np.unravel_index(k, S.shape)))
+
+
+def _select_row(eligible: np.ndarray, S: np.ndarray, *, strategy: str, rng) -> int:
+    """Select a row index from `eligible` according to a strategy."""
+    if eligible.size == 0:
+        raise ValueError("No rows contain non‑zero sigma entries.")
+    if strategy == "random":
+        rng = rng or np.random.default_rng()
+        return int(rng.choice(eligible))
+    if strategy == "max":
+        peaks = S[eligible].max(axis=1)
+        return int(eligible[int(np.argmax(peaks))])
+    raise ValueError("`strategy` must be 'random' or 'max'.")
+
+
 def plot_nonzero_sigma_row(
-    t: Union[np.ndarray, "torch.Tensor"],
-    sigma: Union[np.ndarray, "torch.Tensor"],
+    t: ArrayLike,
+    sigma: ArrayLike,
     *,
-    row_idx: int,
-    threshold: float = 0.0,
-    mark_nonzero: bool = True,
-    title: Optional[str] = None,
-    clip_max: Optional[float] = 100,
+    row_idx: Optional[int] = None,
+    clip_max: Optional[float] = 1000.0,
+    rng: Optional[np.random.Generator] = None,
+    strategy: str = "random",
+    ax: Optional[plt.Axes] = None,
+    show: bool = True,
+    mark_nonzero: bool = False,
+    empty: str = "plot_zero",  # {"error","fallback","plot_zero"}
 ) -> int:
-    """Plot σ along a single ray.
+    """Plot σ for a single ray‑row that has at least one non‑zero entry.
 
-    Parameters
-    ----------
-    t : (R, N) ndarray or torch.Tensor
-        Per‑sample param (e.g., distance along the ray) for labeling.
-    sigma : (R, N) ndarray or torch.Tensor
-        Densities.
-    row_idx : int
-        Which ray to plot.
-    threshold : float, default 0.0
-        Values > threshold are considered "nonzero" for marking.
-    mark_nonzero : bool, default True
-        Shade regions where σ > threshold.
-    title : str | None
-    clip_max : float | None
-        If set, clips σ values to this maximum.
-    Returns
-    -------
-    int
-        The (possibly clamped) row index actually plotted.
+    Returns the row index actually plotted. See module docstring for params.
     """
-    T = _to_numpy_f32(t)
-    S = _to_numpy_f32(sigma, clip_max=clip_max)
-    if T.shape != S.shape:
-        raise ValueError(f"t and sigma shapes must match; got {T.shape} vs {S.shape}")
-
+    S = to_numpy(sigma)
+    if S.ndim != 2:
+        raise ValueError("`sigma` must be 2‑D with shape (R, N).")
     R, N = S.shape
-    r = int(np.clip(row_idx, 0, R - 1))
-    row = S[r]
+    T = _broadcast_t(t, (R, N))
 
-    x = np.arange(N)
-    fig, ax = plt.subplots(figsize=(9, 3), dpi=120)
-    ax.plot(x, row, linewidth=1.5)
-    ax.set_xlabel("Sample index along ray")
-    ax.set_ylabel("σ")
+    eligible = rows_with_nonzero(S)
 
+    if row_idx is None:
+        row_idx = _select_row(eligible, S, strategy=strategy, rng=rng)
+    else:
+        row_idx = int(row_idx)
+        if not (0 <= row_idx < R):
+            raise ValueError(f"`row_idx` out of range [0, {R-1}].")
+        if not (S[row_idx] != 0).any():
+            if empty == "fallback":
+                row_idx = _select_row(eligible, S, strategy=strategy, rng=rng)
+            elif empty == "plot_zero":
+                pass
+            elif empty == "error":
+                raise ValueError(f"Requested row_idx={row_idx} has no non‑zero entries.")
+            else:
+                raise ValueError("`empty` must be one of {'error','fallback','plot_zero' }.")
+
+    x = T[row_idx]
+    y = S[row_idx]
+    if clip_max is not None:
+        y = np.clip(y, 0.0, float(clip_max))
+
+    created = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 3), dpi=120)
+        created = True
+
+    ax.plot(x, y, lw=1.6)
     if mark_nonzero:
-        mask = row > threshold
-        if np.any(mask):
-            # Fill contiguous positive segments
-            starts = np.flatnonzero(np.diff(np.concatenate([[0], mask.astype(int)])) == 1)
-            stops  = np.flatnonzero(np.diff(np.concatenate([mask.astype(int), [0]])) == -1)
-            for a, b in zip(starts, stops):
-                ax.axvspan(a, b - 1, alpha=0.15)
+        nz = (S[row_idx] != 0)
+        ax.scatter(x[nz], y[nz], s=12, zorder=3)
 
-    if title:
-        ax.set_title(title)
-    plt.tight_layout()
-    plt.show()
-    return r
+    ax.set_xlabel("t")
+    ax.set_ylabel("σ")
+    ax.set_title(f"σ along ray row {row_idx}")
+    ax.grid(True, alpha=0.25)
+
+    if created and show:
+        plt.tight_layout()
+        plt.show()
+
+    return row_idx
 
 
 # =============================================================================
@@ -348,9 +424,8 @@ def plot_nonzero_sigma_row(
 # =============================================================================
 
 def visualize_sigma(
-    samples: Tuple[Union[np.ndarray, "torch.Tensor"], Union[np.ndarray, "torch.Tensor"], Union[np.ndarray, "torch.Tensor"]],
-    # (t, delta, pts) where t, delta: (R,N), pts: (R,N,3)
-    sigma_full: Union[np.ndarray, "torch.Tensor"],
+    samples: Tuple[ArrayLike, Optional[ArrayLike], ArrayLike],  # (t, delta, pts)
+    sigma_full: ArrayLike,
     *,
     show_scatter: bool = True,
     show_heatmap: bool = True,
@@ -358,8 +433,7 @@ def visualize_sigma(
     max_scatter_points: int = 5_000,
     max_samples_axis: int = 16,
     heatmap_subsample_threshold: int = 2_000_000,
-    idx_ray_render: Optional[int] = None,  # None → auto pick by max σ
-    # Titles
+    idx_ray_render: Optional[int] = None,
     titles: bool = True,
     scatter_title: Optional[str] = None,
     heatmap_title: Optional[str] = None,
@@ -368,82 +442,41 @@ def visualize_sigma(
 ) -> Dict[str, Optional[float]]:
     """Visualize σ along rays in three coordinated views.
 
-    Views
-    -----
-    1) **3‑D scatter** of sample points colored by σ (subsampled).
-    2) **Heatmap** of σ with optional subsampling for huge arrays.
-    3) **Row inspection**: pick a ray (auto by max σ or user‑specified),
-       plot σ across samples, and report the peak value and its `t`.
-
-    Parameters
-    ----------
-    samples : tuple (t, delta, pts)
-        - `t`, `delta` have shape `(R, N)`; `pts` has shape `(R, N, 3)`.
-    sigma_full : (R, N) ndarray or torch.Tensor
-        Densities along rays.
-    show_scatter, show_heatmap, show_row_inspect : bool
-        Toggle individual views.
-    max_scatter_points : int, default 5000
-        Target point budget for the scatter view.
-    max_samples_axis : int, default 16
-        Upper bound for samples per ray after subsampling.
-    heatmap_subsample_threshold : int, default 2_000_000
-        If `R*N` exceeds this, the heatmap uses the same strides as the scatter.
-    idx_ray_render : int | None
-        Which ray to inspect. If `None`, picks the row with the largest max σ.
-    titles : bool, default True
-        If True, auto‑generate default titles for each view (unless overridden).
-    scatter_title, heatmap_title, row_plot_title : str | None
-        Per‑view title overrides.
-    clip_max : float | None
-        If set, clips σ values to this maximum.
-    Returns
-    -------
-    dict with keys
-        - `row_used` : int | None
-        - `peak_sigma` : float | None
-        - `peak_t` : float | None
-        - `stride_r` : int
-        - `stride_n` : int
+    Returns a dict with: `row_used`, `peak_sigma`, `peak_t`, `stride_r`, `stride_n`.
     """
     if sigma_full is None or samples is None:
-        print("Sigma/samples not provided; pass both to visualize.")
+        print("Sigma/samples not provided; pass both to visualize().")
         return {"row_used": None, "peak_sigma": None, "peak_t": None, "stride_r": 1, "stride_n": 1}
 
-    t, delta, pts = samples
+    t, _delta, pts = samples
 
-    # Basic shape checks
     if _HAS_TORCH and isinstance(sigma_full, torch.Tensor):
         Rtot, Ntot = tuple(sigma_full.shape)
     else:
         Rtot, Ntot = np.asarray(sigma_full).shape[:2]
 
-    assert _to_numpy_f32(t).shape == (Rtot, Ntot), f"t shape mismatch: {_to_numpy_f32(t).shape} vs {(Rtot, Ntot)}"
-    pts_np = _to_numpy_f32(pts)
-    assert pts_np.shape[:2] == (Rtot, Ntot) and pts_np.shape[-1] == 3, f"pts shape mismatch: {pts_np.shape}"
+    pts_np = to_numpy_f32(pts)
+    if pts_np.shape[:2] != (Rtot, Ntot) or pts_np.shape[-1] != 3:
+        raise ValueError(f"`pts` shape mismatch: expected (R,N,3)=({Rtot},{Ntot},3), got {pts_np.shape}.")
 
-    # Choose strides once and reuse
+    # Strides (computed once)
     stride_r, stride_n, Rp, Np = choose_strides(
         Rtot, Ntot,
         max_scatter_points=max_scatter_points,
         max_samples_axis=max_samples_axis,
     )
 
-    # Move to NumPy for plotting (keeps original tensors untouched)
-    sigma_np = _to_numpy_f32(sigma_full, clip_max=clip_max)
-    t_np     = _to_numpy_f32(t)
+    sigma_np = to_numpy_f32(sigma_full, clip_max=clip_max, clamp_nonneg=True)
+    t_np = to_numpy_f32(_broadcast_t(t, (Rtot, Ntot)))
 
     # ---------- Scatter ----------
     if show_scatter:
         X_sub = pts_np[::stride_r, ::stride_n, :]
         S_sub = sigma_np[::stride_r, ::stride_n]
-        if X_sub.ndim == 3 and X_sub.shape[:2] == S_sub.shape:
-            title = scatter_title if scatter_title is not None else (
-                f"σ scatter (subsampled) • R'={X_sub.shape[0]} N'={X_sub.shape[1]}" if titles else None
-            )
-            viz_sigma_scatter(X_sub, S_sub, title=title)
-        else:
-            print("Skipping scatter: incompatible subsampled shapes:", X_sub.shape, S_sub.shape)
+        title = scatter_title if scatter_title is not None else (
+            f"σ scatter (subsampled) • R'={X_sub.shape[0]} N'={X_sub.shape[1]}" if titles else None
+        )
+        viz_sigma_scatter(X_sub, S_sub, title=title)
 
     # ---------- Heatmap ----------
     if show_heatmap:
@@ -469,17 +502,17 @@ def visualize_sigma(
             row_used = int(row_scores.argmax())
             auto_msg = "auto‑selected (max σ row)"
         else:
-            row_used = int(np.clip(idx_ray_render, 0, Rtot - 1))
+            row_used = int(np.clip(int(idx_ray_render), 0, Rtot - 1))
             auto_msg = "user‑selected"
 
-        r_idx = plot_nonzero_sigma_row(
+        _ = plot_nonzero_sigma_row(
             t_np, sigma_np,
             row_idx=row_used,
-            threshold=0.0,
+            clip_max=clip_max,
             mark_nonzero=True,
-            title=(row_plot_title or (f"σ along ray {row_used} (nonzero shaded)") if titles else None),
+            show=True,
         )
-        print(f"Picked row: {r_idx} • {auto_msg}")
+        print(f"Picked row: {row_used} • {auto_msg}")
 
         row_sigma = sigma_np[row_used]
         j = int(row_sigma.argmax())
@@ -496,27 +529,21 @@ def visualize_sigma(
     }
 
 
-# =============================================================================
-# Small axis helpers (pure Matplotlib)
-# =============================================================================
-
-def _draw_triad(ax, *, length: float = 0.2):
-    ax.quiver(0, 0, 0, length, 0, 0)
-    ax.quiver(0, 0, 0, 0, length, 0)
-    ax.quiver(0, 0, 0, 0, 0, length)
-    ax.text(length, 0, 0, 'X')
-    ax.text(0, length, 0, 'Y')
-    ax.text(0, 0, length, 'Z')
-
-
-def _style_3d_axis(ax):
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.view_init(elev=20, azim=-60)
+__all__ = [
+    # Converters
+    "to_numpy", "to_numpy_f32",
+    # Subsampling
+    "choose_strides",
+    # Plots
+    "viz_sigma_scatter", "viz_sigma_heatmap", "plot_nonzero_sigma_row",
+    # Orchestrator
+    "visualize_sigma",
+    # Row utilities
+    "rows_with_nonzero", "pick_random_nonzero_entry",
+]
 
 
-if __name__ == "__main__":  # Minimal self‑test / demo
+if __name__ == "__main__":  # Minimal demo
     R, N = 48, 96
     if _HAS_TORCH:
         t = torch.linspace(0, 1, N).repeat(R, 1)
@@ -529,4 +556,5 @@ if __name__ == "__main__":  # Minimal self‑test / demo
         pts = np.random.randn(R, N, 3) * 0.4 + np.array([0.0, 0.0, 2.0])
         sigma = np.clip(np.sin(10 * t) + 0.15 * np.random.randn(R, N), a_min=0.0, a_max=None)
 
-    print(visualize_sigma((t, delta, pts), sigma, max_scatter_points=6000, max_samples_axis=24))
+    stats = visualize_sigma((t, delta, pts), sigma, max_scatter_points=6000, max_samples_axis=24)
+    print(stats)

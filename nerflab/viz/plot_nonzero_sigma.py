@@ -1,6 +1,7 @@
 
+# nerflab/viz/plot_nonzero_sigma.py
 """
-sigma_plot.py — robust helpers for inspecting per-ray sigma profiles.
+plot_nonzero_sigma.py — robust helpers for inspecting per-ray sigma profiles.
 
 Key ideas
 ---------
