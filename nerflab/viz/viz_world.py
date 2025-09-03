@@ -134,8 +134,12 @@ def plot_world(
     # ── optional override of near/far for visual length of rays ────────────
     t_near: Optional[float] = None,
     t_far: Optional[float] = None,
+
+    # ── labels / title / display ───────────────────────────────────────────
     set_labels: bool = True,
-) -> None:
+    title: Optional[str] = None,               # if None or "", no title is set
+    show: bool = True,                         # call plt.show() at the end
+) -> tuple[matplotlib.figure.Figure, matplotlib.axes._subplots.Axes3DSubplot]:
     """
     Render a World + (batched) Cameras + rays/samples in WORLD frame.
 
@@ -146,6 +150,13 @@ def plot_world(
     exactly `rays_per_pose` rays per pose (unique random on the step-grid).
     If `external_points` is provided, those are plotted instead of sampling
     along rays. Otherwise, set `draw_samples=True` to sample via Camera.sample_along_rays().
+
+    Parameters added:
+      - title: Optional title for the axes (no-op if None/"").
+      - show : Whether to call plt.show() before returning.
+
+    Returns:
+      (fig, ax): Matplotlib Figure and 3D Axes.
     """
     # ── resolve config defaults ────────────────────────────────────────────
     VC = VCFG  # alias
@@ -187,11 +198,16 @@ def plot_world(
     if not cams:
         # Style axis anyway for consistent appearance
         style_3d_axis(ax, invert=invert_axes, elev=elev, azim=azim)
-        plt.tight_layout(); plt.show()
-        return
+        if set_labels:
+            _uniq_legend(ax)
+        if title:
+            ax.set_title(title)
+        plt.tight_layout()
+        if show:
+            plt.show()
+        return fig, ax
 
     color_counter = 0
-
     for cam in cams:
         is_batched = getattr(cam, "_is_batched", False)
         sel = cam._select_cam_indices(cam_indices) if is_batched else [0]
@@ -204,13 +220,12 @@ def plot_world(
         O_all = D_all = None
         if need_rays:
             if rays_per_pose is not None:
-                # Unique random sampling on step-grid (efficient & reproducible with rng)
                 O_all, D_all = cam.get_rays_sampled(
                     rays_per_pose=int(rays_per_pose),
                     frame="world",
                     step=1 if rays_per_pose else max(1, ray_step),
                     normalize=True,
-                    rng=samples_rng,  # forward RNG for reproducibility
+                    rng=samples_rng,
                 )
             else:
                 O_all, D_all = cam.get_rays(
@@ -245,8 +260,6 @@ def plot_world(
             O = O_all[k]  # (R,3)
             D = D_all[k]  # (R,3)
 
-            # If rays_per_pose provided with a strided step, the sampler already respected K;
-            # if rays_per_pose is None, step-thinning was applied in get_rays.
             # External points take precedence over sampling
             if external_points is not None:
                 P = torch.as_tensor(external_points)
@@ -278,7 +291,7 @@ def plot_world(
                     depthshade=False, alpha=samples_alpha, zorder=6
                 )
 
-            # Draw rays (highest z-order among overlays)
+            # Draw rays
             if draw_rays:
                 _viz_add_rays(
                     ax,
@@ -288,10 +301,15 @@ def plot_world(
                     alpha=ray_alpha, zorder=7,
                 )
 
-    # ── axis styling & legend ──────────────────────────────────────────────
+    # ── axis styling & legend / title / show ───────────────────────────────
     style_3d_axis(ax, invert=invert_axes, elev=elev, azim=azim)
     if set_labels:
         _uniq_legend(ax)
+    if title:
+        ax.set_title(title)
 
     plt.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
+    return fig, ax
+

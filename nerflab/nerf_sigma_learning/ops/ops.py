@@ -2,8 +2,8 @@
 import numpy as np
 import torch
 from typing import Callable, Optional, Tuple
-from ..camera.camera import Intrinsics, Camera                           
-from ..config.config import CFG
+from ...camera.camera import Intrinsics, Camera                           
+from ...config.config import CFG
 
 def compute_tau(
     sigma: torch.Tensor,

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from ._common import ensure_dir, maybe_read_json, write_json, to_numpy
-from ..learning.forward_sigma import nerf_opacity
+from ..nerf_sigma_learning.ops.forward_sigma import nerf_opacity
 from nerflab.world.world_json import query_density_field  # expects (B,R,N,3) or (R,N,3)
 
 

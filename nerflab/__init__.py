@@ -46,9 +46,9 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "viz_sigma_heatmap": ("nerflab.viz.viz_sigma", "viz_sigma_heatmap"),
     "viz_sigma_scatter": ("nerflab.viz.viz_sigma", "viz_sigma_scatter"),
 
-    # learning
-    "nerf_opacity": ("nerflab.learning.forward_sigma", "nerf_opacity"),
-    "compute_opacity_simple": ("nerflab.learning.forward_sigma", "compute_opacity_simple"),
+    # nerf_sigma_learning
+    "nerf_opacity": ("nerflab.nerf_sigma_learning.ops.forward_sigma", "nerf_opacity"),
+    "compute_opacity_simple": ("nerflab.nerf_sigma_learning.ops.forward_sigma", "compute_opacity_simple"),
 
     # config
     "CFG": ("nerflab.config.config", "CFG"),
@@ -62,7 +62,7 @@ _SUBMODULES = {
     "camera": "nerflab.camera",
     "world": "nerflab.world",
     "viz": "nerflab.viz",
-    "learning": "nerflab.learning",
+    "nerf_sigma_learning": "nerflab.nerf_sigma_learning",
     "config": "nerflab.config",
 }
 
@@ -77,8 +77,8 @@ __all__ = [
     "World", "Box", "Sphere", "save_world", "load_world", "world",
     # viz
     "plot_world", "viz_sigma_heatmap", "viz_sigma_scatter", "viz",
-    # learning
-    "nerf_opacity", "compute_opacity_simple", "learning",
+    # nerf_sigma_learning
+    "nerf_opacity", "compute_opacity_simple", "nerf_sigma_learning",
     # config
     "CFG", "Cfg", "IntrinsicsCfg", "RaySampleCfg", "config",
 ]
@@ -114,12 +114,12 @@ if TYPE_CHECKING:
     from nerflab.viz.viz_world import plot_world  # type: ignore
     from nerflab.viz.viz_sigma import viz_sigma_heatmap, viz_sigma_scatter  # type: ignore
 
-    from nerflab.learning.forward_sigma import nerf_opacity, compute_opacity_simple  # type: ignore
+    from nerflab.nerf_sigma_learning.ops.forward_sigma import nerf_opacity, compute_opacity_simple  # type: ignore
 
     from nerflab.config.config import CFG, Cfg, IntrinsicsCfg, RaySampleCfg  # type: ignore
 
     import nerflab.camera as camera  # type: ignore
     import nerflab.world as world  # type: ignore
     import nerflab.viz as viz  # type: ignore
-    import nerflab.learning as learning  # type: ignore
+    import nerflab.nerf_sigma_learning as nerf_sigma_learning  # type: ignore
     import nerflab.config as config  # type: ignore
