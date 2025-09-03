@@ -107,6 +107,9 @@ def normalize_optim_for_device(
         pg["foreach"] = False
         if enable_capturable_on_cuda and device.type == "cuda":
             pg["capturable"] = True
+        else:
+            # Ensure it's off on CPU (prevents the same assert you saw)
+            pg["capturable"] = False
 
     for state in optim.state.values():
         # Normalize 'step' first (can be int or CPU tensor)
