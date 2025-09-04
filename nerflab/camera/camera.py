@@ -337,6 +337,8 @@ class Camera:
         # 1) Explicit indices over step-grid
         if indices is not None:
             idx = indices.to(device=device, dtype=torch.long)
+            #TEST step = 1 if indices is not Non because we need explicit order
+            step = 1
             if self._is_batched:
                 if idx.ndim != 2 or idx.shape[0] != B:
                     raise ValueError("indices must be (B,K) for batched sampling")
@@ -384,6 +386,8 @@ class Camera:
             )
 
         # 3) Subsample K rays (unique on the step-grid)
+        #TEST step = 1 if Subsample K rays given because we need explicit order
+        step = 1
         K = int(rays_per_pose)
         if K < 1:
             raise ValueError("rays_per_pose must be >= 1")

@@ -339,7 +339,7 @@ def plot_world(
                 O_all, D_all = cam.get_rays_sampled(
                     rays_per_pose=None,  # ignored when indices is provided
                     frame="world",
-                    step=ray_step,
+                    step=1,
                     normalize=True,
                     rng=samples_rng,
                     indices=idx_for_camera,  # (B,K) for batched, (K,) for single
