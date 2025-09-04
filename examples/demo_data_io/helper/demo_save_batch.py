@@ -100,7 +100,7 @@ def main() -> None:
             store_points=True,
             render_png=args.render_png,
             binary_threshold=0.5,
-            path_world="../data/world.json",  # adjust if your world lives elsewhere
+            path_world="../../data/world.json",  # adjust if your world lives elsewhere
         )
 
         total_written += len(npz_paths)

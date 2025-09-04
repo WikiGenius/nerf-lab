@@ -144,7 +144,7 @@ def save_batch_frames(
     points_dtype = np.float16,
     render_png: bool = True,
     binary_threshold: float = 0.5,
-    path_world: str = "../data/world.json",
+    path_world: str = "../../data/world.json",
     set_title=False
 ) -> List[str]:
     """

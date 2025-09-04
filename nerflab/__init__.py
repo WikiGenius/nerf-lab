@@ -28,6 +28,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "fy_from_fov": ("nerflab.camera.intrinsics", "fy_from_fov"),
     "pose_H": ("nerflab.camera.presets", "pose_H"),
     "make_pose_cases": ("nerflab.camera.presets", "make_pose_cases"),
+    "make_spherical_poses": ("nerflab.camera.presets", "make_spherical_poses"),
     "stratified_samples_batch": ("nerflab.camera.sampling", "stratified_samples_batch"),
     "cartesian_to_spherical": ("nerflab.camera.sampling", "cartesian_to_spherical"),
     "look_at": ("nerflab.camera.transforms", "look_at"),
@@ -43,6 +44,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     
     # viz
     "plot_world": ("nerflab.viz.viz_world", "plot_world"),
+    "plot_world_interactive": ("nerflab.viz.viz_world_interactive", "plot_world_interactive"),
     "viz_sigma_heatmap": ("nerflab.viz.viz_sigma", "viz_sigma_heatmap"),
     "viz_sigma_scatter": ("nerflab.viz.viz_sigma", "viz_sigma_scatter"),
 
@@ -70,13 +72,13 @@ _SUBMODULES = {
 __all__ = [
     "__version__",
     # camera
-    "Camera", "Intrinsics", "fx_from_fov", "fy_from_fov", "pose_H", "make_pose_cases",
+    "Camera", "Intrinsics", "fx_from_fov", "fy_from_fov", "pose_H", "make_pose_cases", "make_spherical_poses",
     "stratified_samples_batch", "cartesian_to_spherical", "look_at", "distance",
     "camera",
     # world
     "World", "Box", "Sphere", "save_world", "load_world", "world",
     # viz
-    "plot_world", "viz_sigma_heatmap", "viz_sigma_scatter", "viz",
+    "plot_world", "plot_world_interactive", "viz_sigma_heatmap", "viz_sigma_scatter", "viz",
     # nerf_sigma_learning
     "nerf_opacity", "compute_opacity_simple", "nerf_sigma_learning",
     # config
@@ -104,7 +106,7 @@ def __dir__():
 if TYPE_CHECKING:
     from nerflab.camera.camera import Camera  # type: ignore
     from nerflab.camera.intrinsics import Intrinsics, fx_from_fov, fy_from_fov  # type: ignore
-    from nerflab.camera.presets import pose_H, make_pose_cases  # type: ignore
+    from nerflab.camera.presets import pose_H, make_pose_cases, make_spherical_poses  # type: ignore
     from nerflab.camera.sampling import stratified_samples_batch, cartesian_to_spherical  # type: ignore
     from nerflab.camera.transforms import look_at, distance  # type: ignore
 
@@ -112,6 +114,7 @@ if TYPE_CHECKING:
     from nerflab.world.world_json import save_world, load_world  # type: ignore
 
     from nerflab.viz.viz_world import plot_world  # type: ignore
+    from nerflab.viz.viz_world_interactive import  plot_world_interactive # type: ignore
     from nerflab.viz.viz_sigma import viz_sigma_heatmap, viz_sigma_scatter  # type: ignore
 
     from nerflab.nerf_sigma_learning.ops.forward_sigma import nerf_opacity, compute_opacity_simple  # type: ignore
