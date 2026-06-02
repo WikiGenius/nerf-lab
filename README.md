@@ -15,6 +15,26 @@ The goal is not to present a full NeRF-SLAM system here. This is a clean public 
 | [`orb_slam_demo`](https://github.com/WikiGenius/orb_slam_demo) | ROS2 scaffold for visual state-estimation demos. |
 | [`research-reading-map`](https://github.com/WikiGenius/research-reading-map) | Literature and architecture map that connects NeRF/view synthesis to active perception. |
 
+## Relation to My Research Direction
+
+NeRF and neural scene representations are relevant to my broader robotics direction as possible future world-model layers for:
+
+- active perception,
+- view synthesis,
+- 3D scene representation,
+- robotic inspection,
+- state estimation support,
+- planning under uncertainty,
+- motion planning in learned scene representations.
+
+This repository supports those ideas as a perception and representation lab. It is not presented as a completed robotics planning contribution.
+
+## Current Maturity
+
+**Current status:** Supporting research lab / future extension layer.
+
+This repository is not currently presented as a completed robotics world-model system or a validated motion-planning pipeline.
+
 ## Research/Engineering Motivation
 Structure-aware scanning depends on how a robot chooses viewpoints and reasons about scene geometry. NeRF-style representations are relevant because they connect camera motion, view coverage, 3D structure, and image formation.
 
@@ -26,6 +46,16 @@ This lab supports the broader research direction by exploring compact tools for 
 - Lightweight dependencies through `pyproject.toml`.
 - Space for future visualizations and reconstruction notes.
 - Public context linking NeRF-style perception to active scanning and SLAM.
+
+## Implemented Now
+
+- [x] Repository organization
+- [x] Python package scaffold: `nerflab`
+- [x] Camera, world, IO, learning, and visualization helper modules
+- [x] Notebook examples for camera poses, world setup, ray sampling, data loading, and exploratory training
+- [ ] Confirmed fully reproducible end-to-end NeRF demo
+- [ ] Robotics planning integration
+- [ ] World-model planning experiment
 
 ## Method
 The public lab is organized around simple, inspectable experiments:
@@ -56,11 +86,11 @@ pip install -e .
 ```
 
 ## Run
-Explore the examples and experiments folders:
+Explore the notebook examples and experiments folders:
 
-```bash
-python examples/<example_name>.py
-```
+Open the `.ipynb` notebooks in `examples/` or `experiments/` using a Jupyter environment.
+
+Helper scripts used by some notebooks are kept under `examples/helper/`.
 
 ## Results
 Future public results can include:
@@ -70,10 +100,26 @@ Future public results can include:
 - viewpoint coverage illustrations,
 - notes connecting NeRF intuition to robot scanning.
 
+## Planned Later
+
+Potential future directions include:
+
+- simple NeRF or neural-rendering demo,
+- camera-ray visualization,
+- view-synthesis experiment,
+- connection to active perception,
+- connection to scan planning,
+- possible world-model interface for motion planning.
+
 ## Limitations
 - This is a learning/research lab, not a production NeRF implementation.
 - It does not include private datasets or unpublished scanning experiments.
 - Robotics integration is conceptual until future demos are added.
+- It does not yet claim a complete robotics world model.
+- It does not yet claim validated integration with mobile manipulation.
+- It does not yet claim real-time planning over NeRF.
+- It does not yet claim benchmarked robotic planning performance.
+- It does not yet claim paper-level results.
 - This repo should support the research story without distracting from the main mobile-manipulation planning repos.
 
 ## Roadmap
