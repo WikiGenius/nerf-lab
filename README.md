@@ -12,7 +12,7 @@ The goal is not to present a full NeRF-SLAM system here. This is a clean public 
 |---|---|
 | [`line-scan-mobile-manipulator-demo`](https://github.com/WikiGenius/line-scan-mobile-manipulator-demo) | Main public demo for active scanning and coverage planning. |
 | [`GTSAM_SLAM_VISION`](https://github.com/WikiGenius/GTSAM_SLAM_VISION) | Factor-graph visual estimation and geometry-based SLAM experiments. |
-| [`orb_slam_demo`](https://github.com/WikiGenius/orb_slam_demo) | ROS2 scaffold for visual state-estimation demos. |
+| [`husky-gazebo-image-capture`](https://github.com/WikiGenius/husky-gazebo-image-capture) | Gazebo Husky image/odometry snapshot capture for later visual-SLAM experiments. |
 | [`research-reading-map`](https://github.com/WikiGenius/research-reading-map) | Literature and architecture map that connects NeRF/view synthesis to active perception. |
 
 ## Relation to My Research Direction

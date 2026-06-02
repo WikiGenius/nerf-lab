@@ -18,7 +18,7 @@ The main research direction is active scanning with a mobile manipulator. That p
 |---|---|
 | [`line-scan-mobile-manipulator-demo`](https://github.com/WikiGenius/line-scan-mobile-manipulator-demo) | Main active-scanning public demo. `nerf-lab` can provide view-synthesis and ray-geometry intuition. |
 | [`GTSAM_SLAM_VISION`](https://github.com/WikiGenius/GTSAM_SLAM_VISION) | Geometry and factor-graph side of visual state estimation. |
-| [`orb_slam_demo`](https://github.com/WikiGenius/orb_slam_demo) | ROS2 visual SLAM scaffold that can eventually connect to perception demos. |
+| [`husky-gazebo-image-capture`](https://github.com/WikiGenius/husky-gazebo-image-capture) | Gazebo Husky image/odometry snapshot capture that can provide public-safe inputs for later visual-SLAM experiments. |
 | [`research-reading-map`](https://github.com/WikiGenius/research-reading-map) | Place for NeRF, neural rendering, SLAM, active perception, and coverage papers. |
 
 ## Public/Private Boundary
