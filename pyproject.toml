@@ -1,13 +1,16 @@
 [project]
 name = "nerflab"
 version = "0.1.0"
-description = "Tiny helpers for NeRF / ray‑marching experiments"
+description = "Tiny helpers for NeRF / ray-marching experiments"
 authors = [{name = "Muhammed Elyamani"}]
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.23",
     "matplotlib>=3.8",
+    "torch>=2.0",
+    "pillow>=10.0",
+    "plotly>=5.18",
     "typing-extensions; python_version<'3.11'",
 ]
 

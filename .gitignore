@@ -102,6 +102,9 @@ data
 # keep small illustrative figures:
 !docs/img/**
 !examples/**/figures/**
+!media/
+!media/demo/
+!media/demo/**
 
 # ---------------------------------------------------------------------------
 # Matplotlib and other runtime junk

@@ -1,0 +1,315 @@
+\documentclass[conference]{IEEEtran}
+
+\IEEEoverridecommandlockouts
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{listings}
+\usepackage[caption=false,font=footnotesize]{subfig}
+\usepackage{balance}
+
+\graphicspath{{./figures/}{./figures/crops/}{./figures/raw/}}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\SE}{\mathrm{SE}}
+\newcommand{\SO}{\mathrm{SO}}
+\newcommand{\trans}{\mathsf{T}}
+\newcommand{\vect}[1]{\bm{#1}}
+\newcommand{\loss}{\mathcal{L}}
+
+\definecolor{codegray}{RGB}{245,245,245}
+\lstdefinestyle{compactpython}{
+    language=Python,
+    backgroundcolor=\color{codegray},
+    basicstyle=\ttfamily\scriptsize,
+    frame=single,
+    breaklines=true,
+    showstringspaces=false,
+    columns=fullflexible,
+    aboveskip=0.45em,
+    belowskip=0.45em
+}
+
+\title{NeRF-SLAM-Oriented Neural Scene Mapping for Dense Visual Localization: Implementation, Results, and Limitations}
+
+\author{\IEEEauthorblockN{Muhammed Elyamani}
+\IEEEauthorblockA{EE656 -- Robotics \& Control\\
+King Fahd University of Petroleum \& Minerals (KFUPM)\\
+Student ID: G202427600\\
+Instructor: Dr. Ali AlBeladi}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This research can be considered the final EE656 project evaluation of NeRF-SLAM-based implementation in Robotics and Control. Neural Radiance Fields (NeRFs) are explored as a dense neural map-based method for visual SLAM. The current implementation involves handling camera poses, generating rays, employing stratified sampling, implementing a small sigma density-only MLP, differentiable opacity/depth rendering, creating experiments in a notebook format, providing visual scene reconstruction output, and giving brief demonstrations. This project scope is intentionally limited. The research is not claimed to be an actual real-time SLAM system with pose tracking and loop closure. It only serves to confirm the feasibility of the neural map/reconstruction core necessary for NeRF SLAM and analyze the gap between NeRF-based scene reconstruction and operational robotic SLAM. The experimental output shows significant density, opacity, and depth features, proves the substantial difference between the rendering process with known and unknown poses, and shows clear limitations related to memory size and computation runtime. In conclusion, NeRF is a highly effective scene representation method, but NeRF-SLAM also requires reliable camera pose estimation, keyframe extraction, graph optimization, compact encoding, and proper GPU memory management.
+\end{abstract}
+
+\begin{IEEEkeywords}
+NeRF, NeRF-SLAM, visual SLAM, neural scene representation, dense mapping, volume rendering, robotics, camera pose estimation.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Simultaneous localization and mapping (SLAM) estimates a robot trajectory while building a map of the surrounding environment. Classical SLAM systems usually maintain sparse landmarks, occupancy grids, surfels, point clouds, or feature-based maps. These representations are useful and computationally efficient, but they can be limited when dense appearance, geometry, and novel-view synthesis are required.
+
+Neural Radiance Fields (NeRFs) offer a different map representation: a continuous neural function that maps a 3-D location, and in the full formulation a viewing direction, to density and color \cite{mildenhall2020nerf}. This makes NeRF attractive for dense visual mapping and view synthesis. Recent NeRF-SLAM systems extend this idea by using a neural implicit map inside the SLAM loop, alternating or jointly optimizing camera poses and neural scene parameters \cite{sucar2021imap,zhu2022nice}. From a robotics and control perspective, this connects directly to the EE656 topics of state estimation, camera geometry, nonlinear residuals, least-squares optimization, uncertainty, and practical SLAM system design.
+
+The project started from the broader theme of structure-aware SLAM and then narrowed during implementation to a NeRF-SLAM-oriented dense mapping study. This scope refinement is important. The implemented system does not yet solve all modules of a full SLAM pipeline. It focuses on the neural rendering and mapping core, then evaluates the resulting behavior through controlled reconstruction, known/unknown pose rendering, indoor and outdoor qualitative demos, and limitation analysis.
+
+The main contributions are:
+\begin{itemize}
+    \item a modular Python implementation for NeRF-style camera rays, sampling, neural density prediction, and differentiable opacity/depth rendering;
+    \item a compact sigma-only MLP experiment pipeline with checkpointed training and evaluation notebooks;
+    \item qualitative NeRF-SLAM-style visualizations on controlled, indoor, and outdoor/desert-like cases;
+    \item extracted quantitative evidence for known-pose versus unknown-pose rendering;
+    \item a critical engineering review of the missing components needed for a complete real-time NeRF-SLAM system.
+\end{itemize}
+
+\section{Relation to SLAM and NeRF-SLAM}
+\subsection{Classical SLAM Objective}
+A typical SLAM formulation estimates robot poses $X=\{T_0,\ldots,T_K\}$ and map variables $M$ from motion and measurement factors. Under Gaussian noise, maximum a posteriori estimation leads to weighted nonlinear least squares \cite{thrun2005probabilistic,barfoot2017state}:
+\begin{equation}
+\min_{X,M}\;\sum_i \|r_i^{\mathrm{motion}}(X)\|_{Q_i^{-1}}^2 + \sum_{(i,j)\in\mathcal{O}} \|r_{ij}^{\mathrm{meas}}(X,M)\|_{R_{ij}^{-1}}^2 .
+\label{eq:slam-objective}
+\end{equation}
+Feature-based systems such as ORB-SLAM solve this problem using sparse image features and geometric constraints \cite{mur2015orb}. NeRF-SLAM changes the map representation and measurement residuals: instead of only feature reprojection error, the system can use photometric, depth, opacity, or rendering residuals against a neural implicit scene.
+
+\subsection{Pose Representation}
+Camera poses are represented as homogeneous transformations
+\begin{equation}
+H_{wc}=\begin{bmatrix}R_{wc} & t_{wc}\\0 & 1\end{bmatrix}\in \SE(3),
+\end{equation}
+where $R_{wc}\in\SO(3)$ and $t_{wc}\in\R^3$. A pose update can be written with a tangent-space perturbation, e.g.,
+\begin{equation}
+H_{wc}\leftarrow H_{wc}\exp(\widehat{\xi}), \qquad \xi\in\R^6,
+\label{eq:pose-update}
+\end{equation}
+which is consistent with Lie-group treatment of robot pose and avoids treating rotations as unconstrained Euclidean variables.
+
+\subsection{Where NeRF Enters the SLAM Loop}
+In a full NeRF-SLAM system, the neural field $F_\theta$ acts as the map. Given a pose $H_k$, camera intrinsics $K$, and image measurements $I_k$, the tracking module estimates the pose by minimizing rendered residuals:
+\begin{equation}
+\min_{H_k}\;\sum_{p\in\Omega_k}\rho\left(I_k(p)-\widehat{I}_\theta(H_k,K,p)\right),
+\label{eq:tracking}
+\end{equation}
+while mapping updates $\theta$ using selected frames or keyframes:
+\begin{equation}
+\min_{\theta}\;\sum_{k\in\mathcal{K}}\sum_{p\in\Omega_k}\rho\left(I_k(p)-\widehat{I}_\theta(H_k,K,p)\right).
+\label{eq:mapping}
+\end{equation}
+The current implementation focuses on the rendering/mapping side of this formulation and treats robust online tracking, relocalization, and loop closure as future extensions.
+
+\section{Implemented Method}
+\subsection{Camera Rays}
+For pixel coordinate $(u,v)$ and camera intrinsics $(f_x,f_y,c_x,c_y)$, the normalized camera-frame ray direction is
+\begin{equation}
+d_c=\frac{1}{\sqrt{x^2+y^2+1}}\begin{bmatrix}x\\y\\1\end{bmatrix},\quad x=\frac{u-c_x}{f_x},\quad y=\frac{v-c_y}{f_y}.
+\label{eq:ray-camera}
+\end{equation}
+The corresponding world-frame ray is
+\begin{equation}
+o=t_{wc},\qquad d=R_{wc}d_c,
+\end{equation}
+and sampled 3-D points are
+\begin{equation}
+x_i=o+t_i d,\qquad i=1,\ldots,N_s.
+\end{equation}
+
+\subsection{Sigma-Only Neural Field}
+The neural map used in this project is a compact density field
+\begin{equation}
+\sigma_\theta:\R^3\rightarrow\R_{\geq 0}.
+\end{equation}
+The model uses positional encoding, hidden fully connected layers, SiLU activation, optional skip connections, and a Softplus output to enforce nonnegative density. In the principal experiment configuration, the model uses positional-encoding length $L=8$, hidden dimension $64$, depth $4$, and about $1.5\times 10^4$ trainable parameters. This is intentionally smaller than modern high-performance NeRF-SLAM map encodings, but it is suitable for course-scale experiments and transparent debugging.
+
+\subsection{Volume Rendering for Opacity and Depth}
+Given densities $\sigma_i$ and sample intervals $\Delta_i$, the optical thickness before sample $i$ is
+\begin{equation}
+\tau_i=\sum_{j<i}\sigma_j\Delta_j.
+\end{equation}
+The transmittance and contribution weight are
+\begin{equation}
+T_i=\exp(-\tau_i),\qquad w_i=T_i\left(1-\exp(-\sigma_i\Delta_i)\right).
+\end{equation}
+The rendered opacity and depth-like estimate are
+\begin{align}
+\widehat{C} &= \sum_i w_i,\label{eq:opacity}\\
+\widehat{D} &= \sum_i w_i t_i.\label{eq:depth}
+\end{align}
+For supervised mask/opacity learning, the loss is
+\begin{equation}
+\loss(\theta)=\frac{1}{N_r}\sum_{r=1}^{N_r}\left(\widehat{C}_r(\theta)-C_r\right)^2.
+\label{eq:loss}
+\end{equation}
+
+\begin{figure*}[t]
+    \centering
+    \subfloat[Implemented NeRF mapping/rendering core.]{\includegraphics[width=0.48\textwidth]{nerf_pipeline.png}\label{fig:pipeline}}\hfill
+    \subfloat[NeRF-SLAM concept and missing online modules.]{\includegraphics[width=0.48\textwidth]{nerf_slam_concept.png}\label{fig:concept}}
+    \caption{System view. The implemented work covers camera pose handling, ray generation, density prediction, opacity/depth rendering, training, and visualization. Full online tracking and loop closure remain outside the implemented scope.}
+    \label{fig:system}
+\end{figure*}
+
+\section{Software Implementation}
+The submitted work is an implementation that is structured into a neat Python package called nerflab. The processed package consists of 83 Python files, 34 test files, and 6 experiments notebook. Table~\ref{tab:modules} summarizes the core modules
+
+\begin{table}[t]
+\centering
+\caption{Main modules in the submitted implementation.}
+\label{tab:modules}
+\begin{tabularx}{\columnwidth}{p{0.31\columnwidth}X}
+\toprule
+\textbf{Module} & \textbf{Purpose}\\
+\midrule
+\texttt{camera} & Intrinsics, poses, transforms, ray generation, and ray sampling.\\
+\texttt{world} & Synthetic worlds, primitive geometry, and JSON scene descriptions.\\
+\texttt{io} & Dataset loading/saving, cached ray-frame utilities, and tensor conversion.\\
+\texttt{nerf\_sigma\_\newline learning} & Sigma MLP, volume-rendering operations, training, evaluation, and checkpointing.\\
+\texttt{viz} & Camera, world, density, point-cloud, and reconstruction visualizations.\\
+\texttt{tests} & Unit tests for camera rays, transforms, sampling, I/O, rendering, and learning ops.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The analyzed package includes the small compatibility fix for modern data classes in Python used during tests and the safeguarded optional property import for the test. Smoke test is executed on the chosen files from the categories camera, rendering, I/O, learning, and world tests. As a result, 56 tests were passed and 1 skipped due to CUDA dependency. 
+
+\section{Experiments and Results}
+\subsection{Controlled Reconstruction}
+The controlled experiment aims at verifying the basics of NeRF before attempting SLAM. Camera poses are created in the scene, followed by sampling rays. The density-MLP neural network is trained, and then rendering is done using the selected viewpoints. Figure \ref{fig:controlled} shows the camera pose coverage and reconstruction achieved. One of the major insights gained from this process is that coverage is key; sparse viewpoints produce an inadequate reconstruction while dense coverage improves it.
+
+\begin{figure}[t]
+    \centering
+    \subfloat[Camera coverage.]{\includegraphics[width=0.48\columnwidth]{coverage_controlled_scene.png}}\hfill
+    \subfloat[Controlled reconstruction.]{\includegraphics[width=0.48\columnwidth]{controlled_reconstruction.png}}
+    \caption{Controlled NeRF reconstruction. This experiment validates the ray generation, sampling, neural density prediction, and rendering pipeline.}
+    \label{fig:controlled}
+\end{figure}
+
+An early rendering comparison showed approximately $4.78$ s on CPU versus $0.89$ s on CUDA for one controlled rendering case. This supports the practical conclusion that NeRF-style rendering must be GPU accelerated for interactive mapping.
+
+\subsection{Known-Pose and Unknown-Pose Rendering}
+A trained checkpoint from the experiment notebooks was evaluated at known and new camera poses. Table~\ref{tab:quant} reports the extracted metrics. The known-pose render achieved PSNR $25.03$ dB, while an unknown-pose render achieved only $14.44$ dB. This large drop is expected because NeRF generalization depends heavily on camera coverage, pose distribution, and scene regularization.
+
+\begin{table}[t]
+\centering
+\caption{Extracted quantitative results from experiment notebooks.}
+\label{tab:quant}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Case} & \textbf{Step} & \textbf{MSE} & \textbf{PSNR}\\
+\midrule
+Experiment 2 checkpoint & 41,200 & -- & 27.69 dB\\
+Known-pose render & 41,200 & 0.003144 & 25.03 dB\\
+Unknown-pose render & 41,200 & 0.035952 & 14.44 dB\\
+Experiment 3 checkpoint & 90,000 & -- & 29.59 dB\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=0.87\columnwidth]{psnr_summary.png}
+    \caption{PSNR summary. The unknown-pose result is substantially weaker than the known-pose case, showing the importance of view coverage and robust camera-pose handling.}
+    \label{fig:psnr}
+\end{figure}
+
+\subsection{Density and Depth Diagnostics}
+A diagnostic experiment tested whether opacity supervision uniquely recovers hidden density along a ray. The final opacity loss in one random-ray experiment was about $6.77\times10^{-5}$, and predicted opacities were close to the target opacity. However, the predicted density distribution along the ray did not necessarily match the true density profile. This is not a bug; opacity is an accumulated integral-like quantity, so different density distributions can produce similar total opacity. Stronger geometry therefore requires additional constraints such as depth supervision, multi-view consistency, color residuals, signed-distance priors, or regularization.
+
+Depth-like rendering also requires care. If a ray has low accumulated opacity, the depth value is not physically meaningful in the same way as a confident occupied ray. This is important for robotic use because a SLAM system should not treat all rendered depths as equally reliable.
+
+\subsection{Indoor and Outdoor NeRF-SLAM-Style Results}
+The results are qualitative and include examples of reconstructed indoor environments as well as desert-like environments, along with their camera paths and geometries. It can be observed from these results that our suggested methodology generates good results but can generate clouds or other flaws in case of suboptimal poses and coverage conditions.
+
+\begin{figure*}[t]
+    \centering
+    \subfloat[Indoor reconstruction with trajectory.]{\includegraphics[width=0.32\textwidth]{indoor_reconstruction_1.png}}\hfill
+    \subfloat[Outdoor/desert-like reconstruction.]{\includegraphics[width=0.32\textwidth]{outdoor_desert_reconstruction.png}}\hfill
+    \subfloat[Failure case with cloudy geometry.]{\includegraphics[width=0.32\textwidth]{failure_cloudy_case.png}}
+    \caption{Representative qualitative results. Indoor scenes are easier than outdoor/desert-like scenes because outdoor cases suffer from scale, weak texture, illumination variation, and incomplete camera coverage.}
+    \label{fig:qual}
+\end{figure*}
+
+The outdoor example is especially relevant for field robotics and inspection scenarios. However, it is also the more difficult setting: repeated terrain appearance, weak texture, changing lighting, and larger scale make tracking and map optimization harder than in controlled indoor scenes.
+
+\section{Discussion}
+\subsection{What Worked}
+These features include camera intrinsics and poses, generation of rays, sampling points on rays, sigma only predictions, differential opacity and depth-like rendering, training check-pointing, and visualization of the reconstructed scene. All of these elements combine to provide a solid basis for the mapping aspect of NeRF SLAM.
+
+\subsection{Claim Boundary}
+The key claim boundary is that the project demonstrates a NeRF-SLAM-oriented mapping core, not a complete real-time SLAM system. Missing modules include online pose tracking, pose-graph optimization, loop closure, relocalization, robust front-end outlier rejection, keyframe management, and quantitative trajectory evaluation using ATE/RPE.
+
+\subsection{Runtime and Memory}
+NeRF rendering is expensive because every image can require millions of neural-field queries. For image size $H\times W$ and $N_s$ samples per ray,
+\begin{equation}
+N_{\mathrm{query}}=HWN_s.
+\end{equation}
+For $640\times480$ resolution and $40$ samples per ray, this is approximately $12.3$ million 3-D query points per dense image. This explains why full NeRF-SLAM needs chunked evaluation, keyframes, mixed precision, compact encodings, and GPU-aware memory control. The reported course-scale environment used a CUDA-capable laptop GPU, which is sufficient for small experiments but restrictive for dense online SLAM.
+
+\section{Limitations and Future Work}
+The current limitations are:
+\begin{itemize}
+    \item no full online tracking, loop closure, or pose-graph correction;
+    \item strong dependence on known poses and sufficient view coverage;
+    \item density ambiguity when only opacity/mask supervision is used;
+    \item weak unknown-pose generalization compared with known-pose rendering;
+    \item high runtime and GPU memory pressure due to dense ray sampling;
+    \item no ATE/RPE trajectory benchmarking yet.
+\end{itemize}
+
+Recommended future work is to add differentiable pose tracking using Eq.~\eqref{eq:tracking}, implement keyframe-based fixed-lag mapping, use a faster representation such as a multiresolution hash grid \cite{muller2022instant}, add RGB/depth/multi-view losses, incorporate robust losses for bad frames and dynamic content, and evaluate trajectories against ground truth using ATE and RPE.
+
+\section{Reproducibility}
+The package that you are seeing comprises the IEEE report in PDF form, LaTeX source document, bibliography, figures, demos, source code, tests, experiment notebook, and README file. A simple configuration looks like the following snippet:
+\begin{lstlisting}[style=compactpython]
+python -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install torch numpy matplotlib pillow jupyter pytest
+pip install -e .
+pytest -q tests/test_camera_core.py \
+    tests/test_forward_sigma_opacity.py \
+    tests/test_learning_ops_core.py
+\end{lstlisting}
+The code has been verified for the submission package by cleaning out any temporary Python files to keep only the relevant files in the package.
+
+\section{Conclusion}
+In this case study, the system contains all necessary elements to generate a dense map representation of NeRF using NeRF SLAM. The results show that the approach is able to learn a relevant depth and opacity map and produce reconstructions qualitatively in both indoor and outdoor settings. In addition, the results show that NeRF SLAM using robotic agents entails more complexities than just the basic NeRF rendering process, such as pose estimation, optimization, and effective GPU memory management.
+
+\section*{Acknowledgment}
+The author expresses gratitude to Dr. Ali AlBeladi for teaching and guiding the EE656 Robotics and Control course and project.
+
+\balance
+\begin{thebibliography}{1}
+
+\bibitem{mildenhall2020nerf}
+B. Mildenhall, P. P. Srinivasan, M. Tancik, J. T. Barron, R. Ramamoorthi, and R. Ng, ``NeRF: Representing scenes as neural radiance fields for view synthesis,'' in \emph{Proc. European Conference on Computer Vision (ECCV)}, 2020, pp. 405--421.
+
+\bibitem{sucar2021imap}
+E. Sucar, S. Liu, J. Ortiz, and A. J. Davison, ``iMAP: Implicit mapping and positioning in real-time,'' in \emph{Proc. IEEE/CVF International Conference on Computer Vision (ICCV)}, 2021, pp. 6209--6218.
+
+\bibitem{zhu2022nice}
+Z. Zhu, S. Peng, V. Larsson, W. Xu, H. Bao, Z. Cui, M. R. Oswald, and M. Pollefeys, ``NICE-SLAM: Neural implicit scalable encoding for SLAM,'' in \emph{Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)}, 2022, pp. 12786--12796.
+
+\bibitem{thrun2005probabilistic}
+S. Thrun, W. Burgard, and D. Fox, \emph{Probabilistic Robotics}. Cambridge, MA, USA: MIT Press, 2005.
+
+\bibitem{barfoot2017state}
+T. D. Barfoot, \emph{State Estimation for Robotics}. Cambridge, U.K.: Cambridge University Press, 2017.
+
+\bibitem{mur2015orb}
+R. Mur-Artal, J. M. M. Montiel, and J. D. Tardos, ``ORB-SLAM: A versatile and accurate monocular SLAM system,'' \emph{IEEE Transactions on Robotics}, vol. 31, no. 5, pp. 1147--1163, 2015.
+
+\bibitem{muller2022instant}
+T. M\"uller, A. Evans, C. Schied, and A. Keller, ``Instant neural graphics primitives with a multiresolution hash encoding,'' \emph{ACM Transactions on Graphics}, vol. 41, no. 4, pp. 102:1--102:15, 2022.
+
+\end{thebibliography}
+
+\end{document}
