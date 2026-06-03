@@ -2,89 +2,60 @@
 
 NeRF-SLAM-oriented neural scene mapping lab for camera rays, pose-aware sampling, sigma-density learning, opacity/depth rendering, and robotics perception experiments.
 
-This repository is a public supporting layer for my robotics research direction. It is not presented as a complete real-time NeRF-SLAM system. The implemented work focuses on the neural mapping/rendering core: camera pose handling, ray generation, stratified samples, a sigma-only MLP, differentiable opacity/depth rendering, checkpointed training utilities, and notebook-based diagnostics.
+`nerf-lab` is a public, course-scale implementation of the neural mapping/rendering layer behind NeRF-SLAM ideas. It supports my broader research direction in structure-aware planning and control for mobile manipulation by studying how camera poses, viewpoint coverage, and dense scene representations affect active perception and scanning.
 
-## At A Glance
+## Project Snapshot
 
-| Question | Answer |
+| Aspect | Summary |
 |---|---|
-| What is this? | A compact NeRF-SLAM-oriented neural mapping lab. |
-| What is implemented? | Camera poses, ray generation, stratified samples, sigma-density learning, opacity/depth rendering, training utilities, and notebook diagnostics. |
-| What is not claimed? | Real-time SLAM, loop closure, pose-graph optimization, live camera tracking, or robot planning over a learned NeRF map. |
-| Why it matters? | It connects camera viewpoint coverage and neural scene representation to future active perception, scanning, and mobile manipulation research. |
+| Role | Supporting perception layer for active perception, visual SLAM, view synthesis, and future world-model planning. |
+| Implemented | Camera poses, ray generation, stratified sampling, sigma-density learning, opacity/depth rendering, training utilities, and notebook diagnostics. |
+| Boundary | Course-scale mapping/rendering layer, not a complete online NeRF-SLAM stack. |
+| Best entry points | `examples/`, `experiments/`, `nerflab/camera/`, and `nerflab/nerf_sigma_learning/`. |
 
-## Visual Preview
+## Visual Evidence
 
-| Pipeline and scene setup | Known-pose depth-style rendering |
+The figures below are real artifacts extracted from the project presentations and notebook outputs.
+
+| Pipeline intuition | Synthetic scene and camera setup |
 |---|---|
-| ![NeRF pipeline intuition and synthetic scene setup](media/demo/pipeline_intuition.png) | ![Depth-like render with PSNR from known poses](media/demo/depth_known_pose_psnr.png) |
+| ![NeRF pipeline intuition](media/demo/pipeline_intuition.png) | ![Synthetic scene and camera setup](media/demo/synthetic_scene_camera_setup.png) |
 
-## Research Role
-
-My main research direction is structure-aware planning and control for mobile manipulation. `nerf-lab` supports the perception side of that direction by studying how camera poses, viewpoint coverage, and neural scene representations affect dense mapping and view synthesis.
-
-This repo is most useful as a bridge between:
-
-- active perception,
-- visual SLAM,
-- view synthesis,
-- dense scene representation,
-- viewpoint coverage,
-- future world-model planning.
-
-## Claim Boundary
-
-This repository demonstrates a NeRF-SLAM-oriented mapping core, not a full online SLAM stack.
-
-Implemented here:
-
-- camera intrinsics and `SE(3)` pose handling,
-- ray generation from camera poses,
-- stratified sampling along rays,
-- simple synthetic world geometry,
-- sigma-only neural density model,
-- NeRF-style opacity rendering,
-- depth-like rendering diagnostics,
-- training/evaluation helpers,
-- notebook experiments and visualizations.
-
-Not claimed here:
-
-- real-time online SLAM,
-- pose tracking from live camera streams,
-- loop closure,
-- relocalization,
-- pose-graph optimization,
-- keyframe selection,
-- ATE/RPE trajectory benchmarking,
-- robotic motion planning over a learned NeRF map.
-
-## Repository Role
-
-| Related repo | Relationship |
+| Spherical camera coverage | Multi-pose ray sampling |
 |---|---|
-| [`line-scan-mobile-manipulator-demo`](https://github.com/WikiGenius/line-scan-mobile-manipulator-demo) | Main public active-scanning demo. |
-| [`GTSAM_SLAM_VISION`](https://github.com/WikiGenius/GTSAM_SLAM_VISION) | Geometry and factor-graph side of visual state estimation. |
-| [`husky-gazebo-image-capture`](https://github.com/WikiGenius/husky-gazebo-image-capture) | Public-safe image/odometry capture for visual-SLAM experiments. |
-| [`research-reading-map`](https://github.com/WikiGenius/research-reading-map) | Literature map for NeRF, SLAM, active perception, and view planning. |
+| ![Spherical camera coverage](media/demo/spherical_camera_coverage.png) | ![Multi-pose ray sampling](media/demo/multi_pose_ray_sampling.png) |
 
-See [research context](docs/research-context.md) for the public/private boundary and portfolio role.
+| Opacity render | Depth-style render |
+|---|---|
+| ![Opacity render with PSNR](media/demo/opacity_known_pose_psnr.png) | ![Depth-like render with PSNR](media/demo/depth_known_pose_psnr.png) |
 
-## What Is Implemented
+| Sigma scatter diagnostic | Sigma heatmap diagnostic |
+|---|---|
+| ![Sigma scatter diagnostic](media/demo/sigma_scatter_diagnostic.png) | ![Sigma heatmap diagnostic](media/demo/sigma_heatmap_diagnostic.png) |
 
-- `nerflab.camera`: intrinsics, camera poses, transforms, ray generation, ray sampling.
-- `nerflab.world`: toy scene primitives and density-field queries.
-- `nerflab.io`: dataset save/load helpers and cached ray-frame utilities.
-- `nerflab.viz`: static and interactive world/ray/sigma visualization.
-- `nerflab.nerf_sigma_learning`: sigma MLP, positional encoding, opacity rendering, training, evaluation, checkpointing, and layer diagnostics.
-- `examples/`: notebooks for cameras, world setup, ray samples, equations, data I/O, pose setup, and sigma training.
-- `experiments/`: exploratory notebooks for known/unknown poses, sigma prediction, depth reveal, and random-ray diagnostics.
+## Results Summary
+
+The implementation works in controlled known-pose settings and exposes the expected gap to full NeRF-SLAM when poses are uncertain.
+
+| Case | Step | Metric |
+|---|---:|---|
+| Experiment 2 checkpoint | 41,200 | PSNR `27.69 dB` |
+| Known-pose render | 41,200 | MSE `0.003144`, PSNR `25.03 dB` |
+| Unknown-pose render | 41,200 | MSE `0.035952`, PSNR `14.44 dB` |
+| Experiment 3 checkpoint | 90,000 | PSNR `29.59 dB` |
+
+Main takeaway:
+
+- camera geometry and ray construction are functioning,
+- sigma-density training can learn meaningful scene occupancy,
+- opacity and depth-style outputs are coherent in controlled examples,
+- unknown-pose rendering is weaker than known-pose rendering.
 
 ## Mathematical Core
 
 ### SLAM Context
 
-A standard SLAM formulation estimates robot/camera poses and map variables from motion and measurement residuals:
+A standard SLAM problem estimates robot/camera poses and map variables from motion and measurement residuals:
 
 $$
 \min_{X,M}
@@ -94,7 +65,7 @@ $$
 \left\|r_{ij}^{\mathrm{meas}}(X,M)\right\|_{R_{ij}^{-1}}^2 .
 $$
 
-In NeRF-SLAM, the map can be represented by a neural field. This lab focuses on the mapping/rendering side of that idea.
+In NeRF-SLAM, the map can be represented by a neural field. This lab focuses on that mapping/rendering side.
 
 ### Camera Pose And Rays
 
@@ -157,14 +128,14 @@ x,
 \right].
 $$
 
-The public model is intentionally small: positional encoding, fully connected layers, SiLU activations, optional skip connections, and a Softplus output to keep density nonnegative.
+The public model uses positional encoding, fully connected layers, SiLU activations, optional skip connections, and a Softplus output to keep density nonnegative.
 
 ### Opacity, Depth, And Loss
 
 For densities `sigma_i` and sample intervals `Delta_i`, the optical thickness before sample `i` is:
 
 $$
-\tau_i=\sum_{j<i}\sigma_j\Delta_j.
+\tau_i=\sum_{j=1}^{i-1}\sigma_j\Delta_j.
 $$
 
 Transmittance and sample weight are:
@@ -175,7 +146,7 @@ T_i=\exp(-\tau_i),
 w_i=T_i\left(1-\exp(-\sigma_i\Delta_i)\right).
 $$
 
-The rendered opacity and depth-like estimate are:
+The rendered opacity and depth-style estimate are:
 
 $$
 \widehat{C}=\sum_i w_i,
@@ -198,7 +169,7 @@ $$
 \mathrm{PSNR}=10\log_{10}\left(\frac{\mathrm{max}^2}{\mathrm{MSE}}\right).
 $$
 
-Dense rendering is computationally expensive because the number of neural-field queries scales as:
+Dense rendering is expensive because neural-field queries scale as:
 
 $$
 N_{\mathrm{query}}=H W N_s.
@@ -206,81 +177,19 @@ $$
 
 For a `640 x 480` image with `40` samples per ray, this is about `12.3M` 3-D query points for one dense render.
 
-## Demo Gallery
+## Code Map
 
-The images below are real artifacts extracted from the project presentations and notebook outputs.
-
-### Pipeline And Scene Setup
-
-| Pipeline intuition | Synthetic scene and camera setup |
-|---|---|
-| ![NeRF pipeline intuition](media/demo/pipeline_intuition.png) | ![Synthetic scene and camera setup](media/demo/synthetic_scene_camera_setup.png) |
-
-### Camera Poses And Ray Coverage
-
-| Spherical camera coverage | Multi-pose ray sampling |
-|---|---|
-| ![Spherical camera coverage](media/demo/spherical_camera_coverage.png) | ![Multi-pose ray sampling](media/demo/multi_pose_ray_sampling.png) |
-
-### Rendering Outputs
-
-| Opacity render | Depth-like render |
-|---|---|
-| ![Opacity render with PSNR](media/demo/opacity_known_pose_psnr.png) | ![Depth-like render with PSNR](media/demo/depth_known_pose_psnr.png) |
-
-### Density Diagnostics
-
-| Sigma scatter diagnostic | Sigma heatmap diagnostic |
-|---|---|
-| ![Sigma scatter diagnostic](media/demo/sigma_scatter_diagnostic.png) | ![Sigma heatmap diagnostic](media/demo/sigma_heatmap_diagnostic.png) |
-
-## Results Summary
-
-The report and notebooks show that the neural mapping core works in controlled settings, while also exposing the gap to full NeRF-SLAM.
-
-| Case | Step | Metric |
-|---|---:|---|
-| Experiment 2 checkpoint | 41,200 | PSNR `27.69 dB` |
-| Known-pose render | 41,200 | MSE `0.003144`, PSNR `25.03 dB` |
-| Unknown-pose render | 41,200 | MSE `0.035952`, PSNR `14.44 dB` |
-| Experiment 3 checkpoint | 90,000 | PSNR `29.59 dB` |
-
-Main interpretation:
-
-- camera geometry and ray construction are functioning,
-- sigma-density training can learn meaningful scene occupancy,
-- opacity and depth outputs are coherent in controlled examples,
-- unknown-pose rendering is much weaker than known-pose rendering,
-- full NeRF-SLAM still requires pose optimization, keyframes, loop closure, and robust memory management.
-
-## Repository Structure
-
-```text
-nerflab/
-  camera/                 camera intrinsics, poses, transforms, ray generation
-  world/                  simple synthetic geometry and density queries
-  io/                     dataset save/load helpers
-  viz/                    static and interactive visualization utilities
-  nerf_sigma_learning/    sigma MLP, rendering ops, training, evaluation
-
-examples/
-  demo_camera/            camera/ray examples
-  demo_world/             toy world setup
-  demo_samples/           ray sample visualizations
-  demo_equations/         rendering equation demos
-  demo_data_io/           data save/load examples
-  demo_setup_poses/       camera pose setup notebooks
-  demo_traning/           sigma training/evaluation notebooks
-
-experiments/              exploratory known/unknown-pose and sigma tests
-media/demo/               README figures copied from real project artifacts
-report/                   final report PDF/TEX
-presentation/             progress presentation decks
-```
+| Area | Path | Purpose |
+|---|---|---|
+| Camera geometry | `nerflab/camera/` | Intrinsics, poses, transforms, ray generation, and ray sampling. |
+| Synthetic world | `nerflab/world/` | Toy geometry and density queries. |
+| Data I/O | `nerflab/io/` | Dataset save/load helpers and cached ray-frame utilities. |
+| Visualization | `nerflab/viz/` | Static and interactive world, ray, and sigma visualizations. |
+| Neural density learning | `nerflab/nerf_sigma_learning/` | Sigma MLP, positional encoding, opacity rendering, training, evaluation, checkpoints, and diagnostics. |
+| Examples | `examples/` | Camera, world, samples, equations, data I/O, pose setup, and sigma training notebooks. |
+| Experiments | `experiments/` | Known/unknown-pose tests, sigma prediction, depth reveal, and random-ray diagnostics. |
 
 ## Installation
-
-Clone and install in editable mode:
 
 ```bash
 git clone https://github.com/WikiGenius/nerf-lab.git
@@ -298,7 +207,7 @@ python -m venv .venv
 pip install -e .
 ```
 
-PyTorch installation can depend on whether CPU or CUDA wheels are desired. Use the official PyTorch install selector if a specific CUDA version is needed.
+PyTorch installation depends on whether CPU or CUDA wheels are needed. Use the official PyTorch selector for a specific CUDA version.
 
 ## Run
 
@@ -313,7 +222,7 @@ examples/demo_traning/
 experiments/
 ```
 
-Core modules:
+Core implementation files:
 
 ```text
 nerflab/camera/camera.py
@@ -331,6 +240,17 @@ nerflab/nerf_sigma_learning/eval/render.py
 - [Progress 1 presentation](presentation/Muhammed%20Elyamani%20-%20NERF%20SLAM%20-%20progress1.pptx)
 - [Progress 2 presentation](presentation/Muhammed%20Elyamani%20-%20NERF%20SLAM%20-%20progress2.pptx)
 
+## Related Portfolio Repos
+
+| Repo | Relationship |
+|---|---|
+| [`line-scan-mobile-manipulator-demo`](https://github.com/WikiGenius/line-scan-mobile-manipulator-demo) | Main public active-scanning demo. |
+| [`GTSAM_SLAM_VISION`](https://github.com/WikiGenius/GTSAM_SLAM_VISION) | Geometry and factor-graph side of visual state estimation. |
+| [`husky-gazebo-image-capture`](https://github.com/WikiGenius/husky-gazebo-image-capture) | Image/odometry capture for visual-SLAM experiments. |
+| [`research-reading-map`](https://github.com/WikiGenius/research-reading-map) | Literature map for NeRF, SLAM, active perception, and view planning. |
+
+See [research context](docs/research-context.md) for the public/private boundary and portfolio role.
+
 ## Limitations
 
 - No full online pose tracking, loop closure, or pose-graph correction.
@@ -339,7 +259,7 @@ nerflab/nerf_sigma_learning/eval/render.py
 - Unknown-pose generalization is weaker than known-pose rendering.
 - Dense rendering creates high runtime and GPU memory pressure.
 - No ATE/RPE trajectory benchmarking yet.
-- The current work is course-scale and notebook-driven, not production NeRF-SLAM.
+- Course-scale and notebook-driven; not production NeRF-SLAM.
 
 ## Roadmap
 
