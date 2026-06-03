@@ -4,6 +4,21 @@ NeRF-SLAM-oriented neural scene mapping lab for camera rays, pose-aware sampling
 
 This repository is a public supporting layer for my robotics research direction. It is not presented as a complete real-time NeRF-SLAM system. The implemented work focuses on the neural mapping/rendering core: camera pose handling, ray generation, stratified samples, a sigma-only MLP, differentiable opacity/depth rendering, checkpointed training utilities, and notebook-based diagnostics.
 
+## At A Glance
+
+| Question | Answer |
+|---|---|
+| What is this? | A compact NeRF-SLAM-oriented neural mapping lab. |
+| What is implemented? | Camera poses, ray generation, stratified samples, sigma-density learning, opacity/depth rendering, training utilities, and notebook diagnostics. |
+| What is not claimed? | Real-time SLAM, loop closure, pose-graph optimization, live camera tracking, or robot planning over a learned NeRF map. |
+| Why it matters? | It connects camera viewpoint coverage and neural scene representation to future active perception, scanning, and mobile manipulation research. |
+
+## Visual Preview
+
+| Pipeline and scene setup | Known-pose depth-style rendering |
+|---|---|
+| ![NeRF pipeline intuition and synthetic scene setup](media/demo/pipeline_intuition.png) | ![Depth-like render with PSNR from known poses](media/demo/depth_known_pose_psnr.png) |
+
 ## Research Role
 
 My main research direction is structure-aware planning and control for mobile manipulation. `nerf-lab` supports the perception side of that direction by studying how camera poses, viewpoint coverage, and neural scene representations affect dense mapping and view synthesis.
