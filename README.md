@@ -2,7 +2,7 @@
 
 NeRF-SLAM-oriented neural scene mapping lab for camera rays, pose-aware sampling, sigma-density learning, opacity/depth rendering, and robotics perception experiments.
 
-`nerf-lab` is a public, course-scale implementation of the neural mapping/rendering layer behind NeRF-SLAM ideas. It supports my broader research direction in structure-aware planning and control for mobile manipulation by studying how camera poses, viewpoint coverage, and dense scene representations affect active perception and scanning.
+`nerf-lab` is a public, course-scale implementation of the neural mapping/rendering layer behind NeRF-SLAM ideas. It supports my broader research direction in task-driven active perception, motion planning, and control by studying how camera poses, viewpoint coverage, and dense scene representations affect active perception and scanning.
 
 ## Project Snapshot
 
@@ -244,10 +244,10 @@ nerflab/nerf_sigma_learning/eval/render.py
 
 | Repo | Relationship |
 |---|---|
-| [`line-scan-mobile-manipulator-demo`](https://github.com/WikiGenius/line-scan-mobile-manipulator-demo) | Main public active-scanning demo. |
+| [`line-scan-mobile-manipulator-demo`](https://github.com/WikiGenius/line-scan-mobile-manipulator-demo) | Early active-scanning application scaffold; not a runnable or validated planner. |
 | [`GTSAM_SLAM_VISION`](https://github.com/WikiGenius/GTSAM_SLAM_VISION) | Geometry and factor-graph side of visual state estimation. |
 | [`husky-gazebo-image-capture`](https://github.com/WikiGenius/husky-gazebo-image-capture) | Image/odometry capture for visual-SLAM experiments. |
-| [`research-reading-map`](https://github.com/WikiGenius/research-reading-map) | Literature map for NeRF, SLAM, active perception, and view planning. |
+| [`research-reading-map`](https://github.com/WikiGenius/research-reading-map) | Reading taxonomy and note templates for perception-aware planning. |
 
 See [research context](docs/research-context.md) for the public/private boundary and portfolio role.
 
